@@ -14,6 +14,13 @@ const eslintConfig = defineConfig([
     "work/**",
   ]),
   {
+    // Node-утилиты и тесты репозитория намеренно написаны на CommonJS.
+    files: ["**/*.cjs"],
+    rules: {
+      "@typescript-eslint/no-require-imports": "off",
+    },
+  },
+  {
     files: ["components/ui/**/*.{ts,tsx}", "hooks/use-mobile.ts"],
     rules: {
       // These files are vendored verbatim from shadcn@4.17.0. Keep the

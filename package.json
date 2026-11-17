@@ -7,10 +7,13 @@
   },
   "scripts": {
     "install:ci": "node scripts/install-ci.mjs",
-    "dev": "node preview.cjs",
-    "build": "node build.cjs",
-    "start": "node preview.cjs --dist",
-    "test": "node --test tests/model.test.cjs",
+    "dev": "vinext dev",
+    "dev:designs": "node preview.cjs",
+    "build": "vinext build",
+    "build:designs": "node build.cjs",
+    "start": "node scripts/start-worker.mjs",
+    "preview:designs": "node preview.cjs --dist",
+    "test": "node --test tests/model.test.cjs tests/ruli-model.test.mjs tests/scheduling.test.mjs tests/actions.test.mjs tests/collaboration.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate"
   },
@@ -67,5 +70,13 @@
     "miniflare": {
       "sharp": "0.35.4"
     }
+  },
+  "allowScripts": {
+    "esbuild@0.18.20": true,
+    "esbuild@0.25.12": true,
+    "esbuild@0.28.0": true,
+    "esbuild@0.27.3": true,
+    "unrs-resolver@1.11.1": true,
+    "workerd@1.20260515.1": true
   }
 }

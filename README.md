@@ -1,133 +1,128 @@
-# vinext-starter
+# Рули
 
-A clean full-stack starter running on [vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and Drizzle support.
+Приложение для управления иерархией задач команды: ответственные и участники, сроки, результаты и проверка руководителем, обсуждения и график работы. Реализация: React Server Components, Vinext, Cloudflare Workers, D1 и Drizzle. Статические макеты в `designs/` сохранены отдельно; рабочее приложение находится в `app/`.
 
-## Prerequisites
+## Возможности
 
-- Node.js `>=22.13.0`
-- Portable: Windows, macOS, or Linux; no Bash required
-- Managed Linux: managed Linux runtime with Bash, `flock`, `curl`, `sha256sum`, and GNU `timeout`
-- Git and `tar` (including Windows `tar.exe`) are required for publishing; portable publication does not require Bash
+- Группы и поручения с описанием, сроком, ответственным и участниками; поиск и фильтры по исполнителю, статусу и просрочке.
+- Результат вручную отправляется на проверку; руководитель принимает его или возвращает в работу. Grok и другие AI-боты пока не подключены к API.
+- Изменения проверяют версию записи. Устаревшая форма не перезаписывает чужие правки; ошибки текста и даты возвращаются без скрытого обрезания введённых значений.
+- Удалённая ветка попадает в корзину и восстанавливается целиком. Если родитель удалён, сначала нужно восстановить его. Разбиение поручения можно отменить, пока это не приведёт к потере новых подзадач, отдельного обсуждения или плана.
+- Общий чат блока и отдельные диалоги с исполнителями; график по дням с учётом загрузки участников.
 
-## Sites Lifecycle
+## Локальный запуск
 
-The Sites initializer copies the shared starter and selects managed-linux only when `SITES_MANAGED_LINUX_CONTAINER=1`; otherwise it selects portable. It saves the selection only in ignored `.sites-runtime/execution-profile.json`. Both profiles copy/configure first, then use the plugin's separate `install-dependencies.mjs` step to measure installation independently. Edit source under `app/` and follow the Sites skill for installation, preview, builds, and publishing.
+Команды выполняются из корня репозитория. В `package.json` заявлен Node.js `>=22.13.0`; текущий полный набор проверок запускается на Node.js 24 и использует `node:sqlite` и прямой импорт TypeScript. Для разработки и запуска всех тестов используйте Node.js 24. Установка зависимостей работает в Windows, macOS и Linux.
 
-Run `node <plugin-root>/scripts/configure-execution-profile.mjs` only when the profile is unknown for the current checkout and environment. Profile changes do not alter tracked source or require reinstalling otherwise-valid dependencies; restart an existing preview to use the new selection. Do not commit or upload `.sites-runtime/`.
+1. Установите зависимости из lockfile:
 
-This starter does not use `wrangler.jsonc`.
+   ```sh
+   npm run install:ci
+   ```
 
-Publish archives outside the source checkout or under its ignored `outputs/` directory. Local `.env*`, `.dev.vars*`, TypeScript build state, and tool runtime directories are ignored; keep the hosting manifest, migrations, and authored scripts in source control.
+2. Создайте локальный файл `.dev.vars` в корне. **Только для локального тестового входа** его содержимое:
 
-`install:ci` runs `npm ci` once against the shared lockfile, disables parent-workspace discovery, and includes required dev/optional dependencies despite production/omit settings. Sharp defaults to prebuilt binaries unless explicitly configured otherwise. Do not overlap installers.
+   ```dotenv
+   RULI_OWNER_EMAIL=seedy@sites.test
+   ```
 
-- **Portable:** Preserve host HOME, npm cache, registry, proxy, temporary paths, retry/concurrency settings, and lifecycle-script policy. Use `--prefer-offline --no-audit --no-fund`.
-- **Managed Linux:** Use the existing project-local HOME/cache/tmp setup and Linux install lock, tarball preflight, and timeout. Restore the image-seeded npm cache only when its lockfile hash matches; retain network fallback. Builds keep their existing timeout. These helpers are not invoked by the portable profile.
+   `.dev.vars*` исключён из Git. Не помещайте реальные адреса владельца или другие значения окружения в исходники, README, архив публикации или коммиты.
 
-`scripts/sites-env.mjs` preserves the caller's HOME, npm cache, proxy, XDG, and temporary-directory configuration while defaulting Wrangler and Miniflare state to the checkout. If npm reports an unwritable cache, select a writable path with `npm_config_cache` for that install. The `dev` and `start` scripts also keep Wrangler logs inside the checkout. Generated `.sites-runtime/` and `.wrangler/` directories are disposable and ignored by Git.
+3. Соберите приложение, чтобы получить конфигурацию Worker, затем примените миграции к новой локальной базе:
 
-On portable, `npm run dev` uses `vinext dev` with HMR, starting at port 5173. Vinext records the running server in ignored `.vinext/` state, rejects an ordinary duplicate launch, and recovers stale state after a stopped process; exactly simultaneous starts can race. Pass `--port <port>` or `--hostname <host>` after `npm run dev --` when needed; keep portable previews on loopback.
+   ```sh
+   npm run build
+   node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0000_striped_tarot.sql
+   node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0001_clear_ultragirl.sql
+   ```
 
-For managed Linux browser QA, follow the Sites skill's managed preview reference. The daemon runs the project's Vite dev script with `--host 0.0.0.0 --port 4173 --strictPort`; use the CLI's returned URL. The ignored local profile survives the daemon's cleared environment.
+   Для существующей базы применяйте только ещё не применённые миграции в порядке номеров. Эти команды `d1 execute` сами не ведут журнал применённых файлов; повторный запуск уже применённого DDL может завершиться ошибкой.
 
-The portable profile simulates ChatGPT sign-in only for loopback development requests. Visit `/signin-with-chatgpt?return_to=/` to sign in as `local_seedy` (`seedy@sites.test`, display name `Seedy`) and `/signout-with-chatgpt?return_to=/` to sign out. The development cookie preserves that identity across server restarts. Mock auth is disabled in the managed-linux profile and is not included in production builds; hosted authentication remains dispatch-owned.
+4. Запустите приложение:
 
-The Worker uses `vinext/server/fetch-handler`, including Vinext's config-aware image handling. After building, `npm start` runs that Worker locally through Wrangler on `127.0.0.1`, sharing `.wrangler/state` with dev preview and local D1 migrations; it does not deploy the site or simulate sign-in. Use the URL printed by the server. Pass `npm start -- --port <port>` to select a different built-preview port.
+   ```sh
+   npm run dev
+   ```
 
-Local previews use Miniflare's placeholder `Request.cf` metadata without a network lookup. Set `CLOUDFLARE_CF_FETCH_ENABLED=true` to opt into fetching preview metadata; this setting does not change hosted request metadata.
+   Используйте адрес из вывода Vinext; обычно это [http://127.0.0.1:5173](http://127.0.0.1:5173). При необходимости задайте порт: `npm run dev -- --port 5173`.
 
-Local tool usage metrics are disabled by default. Set `WRANGLER_SEND_METRICS=true` to opt in.
+5. Откройте [локальный вход](http://127.0.0.1:5173/signin-with-chatgpt?return_to=/). В portable-профиле на loopback он создаёт тестовую identity `local_seedy`, email `seedy@sites.test`, имя `Seedy`. При указанном выше локальном `RULI_OWNER_EMAIL` это руководитель. Выход: `/signout-with-chatgpt?return_to=/`.
 
-## Included Shape
+Локальный mock-вход действует только на сервере разработки и loopback-запросах; в managed-linux он отключён, в производственную сборку не включается. Это способ проверить приложение локально, а не способ авторизации реальной команды.
 
-- edit site code under `app/`
-- `app/chatgpt-auth.ts` provides optional dispatch-owned ChatGPT sign-in helpers
-- `.openai/hosting.json` declares optional Sites D1 and R2 bindings
-- `vite.config.ts` simulates declared bindings for local development
-- `worker/index.ts` is the production Worker entrypoint and preserves request-scoped connector bindings
-- `scripts/vite/` contains the maintained Vite integrations and the vendored Sites plugin license
-- `scripts/connector-preview/` contains the local connector preview Worker and session helpers
-- the remaining `scripts/` files select execution profiles and run installation, development, and builds; the plugin's helpers orchestrate the Sites lifecycle
-- `dist/` contains generated deployment output; `.vinext/`, `.wrangler/`, and `.sites-runtime/` contain ignored local tool state
-- `db/index.ts` reads the D1 binding from the Cloudflare Worker environment
-- `db/schema.ts` starts intentionally empty
-- `@cloudflare/workers-types` provides Worker types; `cloudflare-env.d.ts` declares optional `DB`/`BUCKET` bindings—update these declarations if binding names change
-- `examples/d1/` contains an optional D1 example surface
-- `drizzle.config.ts` supports local migration generation when needed
+## База данных и миграции
 
-## Workspace Auth Headers
+`.openai/hosting.json` объявляет D1-привязку `DB`; R2 сейчас не используется. Схема описана в `db/schema.ts`, SQL-миграции — в `drizzle/`.
 
-Signed-in visitors receive both `oai-authenticated-user-id` and `oai-authenticated-user-email`. Private Sites require every visitor to sign in; public Sites may also have anonymous visitors, for whom neither header is present.
+**Схема создаётся и обновляется только миграциями. DDL при обработке запросов нет.** `lib/ruli/bootstrap.ts` при отсутствии корневой задачи добавляет демонстрационную команду и задачи одним batch в уже существующие таблицы. Это не заменяет миграции: без них приложение не запустится.
 
-The user ID is stable for the same user on the same Site and different across Sites. Use it as the durable user key; use email and name for display or contact purposes.
-
-SIWC-authenticated workspace sites may also receive `oai-authenticated-user-full-name` when the user's SIWC profile has a non-empty `name` claim. The full-name value is percent-encoded UTF-8 and is accompanied by `oai-authenticated-user-full-name-encoding: percent-encoded-utf-8`.
-
-Treat the full name as optional and fall back to email when it is absent:
-
-```tsx
-import { headers } from "next/headers";
-
-export default async function Home() {
-  const requestHeaders = await headers();
-  const userId = requestHeaders.get("oai-authenticated-user-id");
-  const email = requestHeaders.get("oai-authenticated-user-email");
-  const encodedFullName = requestHeaders.get("oai-authenticated-user-full-name");
-  const fullName =
-    encodedFullName &&
-    requestHeaders.get("oai-authenticated-user-full-name-encoding") ===
-      "percent-encoded-utf-8"
-      ? decodeURIComponent(encodedFullName)
-      : null;
-
-  const displayName = fullName ?? email;
-  // ...
-}
-```
-
-## Optional Dispatch-Owned ChatGPT Sign-In
-
-Import the ready-to-use helpers from `app/chatgpt-auth.ts` when the site needs optional or required ChatGPT sign-in:
-
-- Use `getChatGPTUser()` for optional signed-in UI.
-- Use the returned `userId` as the stable user key for user-owned records; do not use email as a durable identifier.
-- Use `requireChatGPTUser(returnTo)` for server-rendered pages that should send anonymous visitors through Sign in with ChatGPT.
-- In a Server Component, start sign-in with `<a href={chatGPTSignInPath(returnTo)} target="_top">`. The auth helper module is server-only; do not import it into a Client Component.
-- Do not use `fetch`, XHR, a client-side router, or a framework link that can prefetch the sign-in route. SIWC must start as a top-level navigation.
-- Never request the AuthAPI authorization endpoint directly. The dispatch-owned `/signin-with-chatgpt` route must start the SIWC flow.
-- Use `chatGPTSignOutPath(returnTo)` for browser sign-out links or actions.
-- Pass a same-origin relative `returnTo` path for the destination after sign-in or sign-out. The helper validates and safely encodes it.
-- Mark protected pages with `export const dynamic = "force-dynamic"` because they depend on per-request identity headers.
-
-Dispatch owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, `/callback`, the OAuth cookies, and identity header injection. Do not implement app routes for those reserved paths. Routes that do not import and call the helper remain anonymous-compatible.
-
-SIWC establishes identity only; it does not prove workspace membership. Use the Sites hosting platform's access policy controls for workspace-wide restrictions, or enforce explicit server-side membership or allowlist checks.
-
-Use SIWC for account pages, user-specific dashboards, saved records, and write actions tied to the current ChatGPT user. Leave public content anonymous.
-
-## Local D1 migrations
-
-For a D1-backed local preview, generate SQL with `npm run db:generate`. Build once through the Sites skill's build entrypoint (or `npm run build` for standalone use) to generate `dist/server/wrangler.json`, rebuilding if bindings change. From the project root, apply each pending migration in order:
+После изменения схемы:
 
 ```sh
-node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0000_example.sql
+npm run db:generate
 ```
 
-Replace the filename with the pending migration and `DB` with your D1 binding name if different. Use `.wrangler/state`, not `.wrangler/state/v3`; Wrangler adds the versioned directories. Do not replay migrations already applied locally. This updates only the preview database; publishing applies production migrations separately.
+Проверьте созданный SQL и примените только новую миграцию. Для локальной базы используйте команды из раздела запуска с её именем. Рабочие данные dev-сервера и локального Worker хранятся в `.wrangler/state`; указывайте именно этот каталог, без ручного добавления `/v3`.
 
-## Diagnostic Commands
+Локальные миграции с `--local` не изменяют опубликованную базу. При публикации через Sites используйте его процесс сборки и применения миграций. Если развертывание выполняется самостоятельно, примените миграции к целевой D1 перед запуском новой версии приложения.
 
-- `npm run install:ci`: perform the one locked dependency install
-- `npm run dev`: start the Vite/Vinext development server
-- `npm run build`: build the deployable Sites artifact
-- `npm run start`: preview the built Worker locally with D1/R2 support
-- `npm run db:generate`: generate Drizzle migrations after schema changes
+## Владелец, вход и роли
 
-When using the Sites plugin, follow its skill instructions for installation, builds, and publishing. These npm commands remain available for standalone use.
+Для первоначального доступа руководителя обязательна Worker-переменная **`RULI_OWNER_EMAIL`**. В размещённом приложении установите в окружении Worker реальный email владельца, подтверждаемый при входе через ChatGPT. Тестовый `seedy@sites.test` используйте только в локальном окружении разработки.
 
-The portable build runs Vinext directly without a host `timeout` command. The managed-linux build uses `scripts/build-verified.sh` and its existing `SITES_BUILD_TIMEOUT` setting.
+Первый произвольный посетитель не становится владельцем. При входе с настроенной почтой приложение связывает подтверждённую identity с участником `me` и ролью `manager`. Без настроенного владельца и без предварительно допущенных аккаунтов доступ закрыт. Изменение переменной не удаляет уже созданные привязки аккаунтов.
 
-## Learn More
+Размещённая версия использует маршруты авторизации платформы Sites: `/signin-with-chatgpt`, `/signout-with-chatgpt` и `/callback`. Приложение дополнительно проверяет членство в команде через `team_accounts`; одной успешной авторизации недостаточно. Доступ к самому Site и доступ к команде — отдельные проверки.
 
-- [vinext Documentation](https://github.com/cloudflare/vinext)
-- [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
+| Роль | Доступ |
+| --- | --- |
+| Руководитель (`manager`) | Создание и правка задач, назначения, перестановка, разбиение, корзина, приёмка результатов, управление доступом, чат и график. |
+| Исполнитель (`executor`) | Просмотр задач, сдача результата поручений, где он ответственный или явный участник, общий чат и собственные диалоги с руководителем. |
+| Наблюдатель (`viewer`) | Просмотр задач, графика и общего обсуждения; без изменений, отправки сообщений и доступа к чужим личным диалогам. |
+
+В разделе «Команда» руководитель добавляет email, имя и роль `executor` или `viewer`. Можно создать нового участника либо связать доступ с существующим человеком команды. Одного исполнителя нельзя привязать к нескольким аккаунтам; бот и участник `me` не подходят для такой привязки.
+
+Добавление доступа не отправляет письмо-приглашение. Передайте участнику ссылку на Site отдельно и разрешите ему доступ к Site, если он закрытый. При первом входе с указанным подтверждённым email запись связывается со стабильным `userId`; дальнейшая проверка использует эту привязку. Состояние первого входа видно руководителю в списке доступов.
+
+## Обсуждения и график
+
+Обсуждение относится к конкретному блоку. Общий канал виден допущенным участникам; писать могут руководитель и исполнители. Отдельный канал с исполнителем доступен руководителю и соответствующему исполнителю. Автор сообщения определяется сервером из identity. Повторная отправка того же сообщения защищена от дублирования; на экран загружаются последние 100 сообщений.
+
+Руководитель формирует график для незавершённых поручений внутри выбранного блока: задаёт начало, часы рабочего дня, оценку трудоёмкости поручения и учёт выходных. Генератор распределяет часы по ответственным, учитывает существующую загрузку и сообщает, если результат выходит за сроки или ограничения. Даты и часы записей можно редактировать; превышение дневной загрузки проверяется сервером. Это планирование по заданной оценке, а не автоматический учёт фактически отработанного времени.
+
+Повторная генерация заменяет текущий график и ручные правки только после подтверждения. Поручения, уже включённые в другой план, повторно не планируются. Разбиение переносит существующие записи на исходную подзадачу; безопасная отмена возвращает их обратно. Удаление задачи скрывает связанные обсуждения и графики, восстановление возвращает их.
+
+## Команды и проверки
+
+| Команда | Назначение |
+| --- | --- |
+| `npm run install:ci` | Установка зависимостей из `package-lock.json` с dev/optional-пакетами. |
+| `npm run dev` | Приложение Vinext с HMR, обычно порт 5173. |
+| `npm run build` | Сборка приложения и Worker в `dist/`. |
+| `npm start` | Локальный запуск собранного Worker через `scripts/start-worker.mjs`, `127.0.0.1:8787`. |
+| `npm start -- --port 8790` | Тот же Worker на заданном порту. |
+| `npm test` | Модель, сроки, планирование, серверные действия и совместная работа, включая SQLite-проверки SQL, ролей и конфликтов версий. |
+| `npm run lint` | ESLint. |
+| `npx tsc --noEmit` | Проверка TypeScript. |
+| `npm run db:generate` | Генерация SQL-миграций после изменения схемы. |
+| `npm run dev:designs` | Старые статические макеты на `127.0.0.1:5184`. |
+| `npm run build:designs` | Копирование статических макетов в `dist/`. |
+| `npm run preview:designs` | Статическое превью содержимого `dist/` на порту 5184. |
+
+`npm start` требует предварительной сборки и миграций, не публикует приложение и не предоставляет mock-вход разработки. Для локальной проверки сценариев с авторизацией используйте `npm run dev`. `build:designs` и сборка приложения используют один каталог `dist/`; перед запуском Worker после работы с макетами снова выполните `npm run build`.
+
+Тесты действий выполняют настоящий SQL в изолированной SQLite-базе, заменяя границы хостинга: D1-транспорт, identity и redirects. Они не заменяют проверку опубликованного Worker с реальными аккаунтами и привязками.
+
+## Структура
+
+- `app/` — страницы задач, команды и корзины; серверные действия и API сообщений.
+- `components/ruli/` — интерфейс, формы, обсуждения и график.
+- `lib/ruli/model.ts`, `scheduling.ts` — чистая модель и алгоритм распределения работы.
+- `lib/ruli/access.ts`, `policy.ts` — членство в команде и права.
+- `lib/ruli/data.ts`, `bootstrap.ts`, `mutations.ts`, `collaboration.ts` — чтение, начальные данные и изменения D1.
+- `db/schema.ts`, `drizzle/` — схема и миграции.
+- `worker/index.ts`, `vite.config.ts`, `.openai/hosting.json` — Worker, локальные привязки и размещение Sites.
+- `tests/` — модельные и интеграционные проверки.
+- `designs/` — прежние автономные макеты, не использующие текущую D1.
+
+Локальные `.dev.vars*`, `.env*`, `.wrangler/`, `.vinext/`, `.sites-runtime/`, `outputs/` и зависимости исключены из Git. При работе через Sites следуйте инструкции его плагина для выбранного portable/managed-linux окружения, сборки и публикации. Не включайте локальные данные D1 или файлы окружения в архив исходников.

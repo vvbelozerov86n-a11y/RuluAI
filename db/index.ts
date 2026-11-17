@@ -11,3 +11,8 @@ export function getDb() {
 
   return drizzle(env.DB, { schema });
 }
+
+export function getD1(): D1Database {
+  if (!env.DB) throw new Error("D1 DB binding is required");
+  return env.DB;
+}
