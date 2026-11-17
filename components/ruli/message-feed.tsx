@@ -47,6 +47,7 @@ export function MessageFeed({
     return [...byId.values()].sort((a,b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)).slice(-100);
   }, [initialMessages, polledMessages]);
   const [networkError, setNetworkError] = useState("");
+  const [aiPending,setAiPending] = useState(0);
   const listRef = useRef<HTMLOListElement>(null);
   const messagesRef = useRef(messages);
   const readingRef = useRef<ReadingPosition | null>(null);
@@ -124,6 +125,8 @@ export function MessageFeed({
         const next = raw.slice(-100);
         if (disposed || controller.signal.aborted) return;
         setNetworkError("");
+        const pending=(payload as {aiPending?:unknown}).aiPending;
+        setAiPending(typeof pending==="number"&&Number.isSafeInteger(pending)&&pending>0?pending:0);
         if (JSON.stringify(next) === JSON.stringify(messagesRef.current)) return;
 
         const list = listRef.current;
@@ -162,7 +165,7 @@ export function MessageFeed({
       void refresh();
     }
 
-    const interval = window.setInterval(() => void refresh(), 10_000);
+    const interval = window.setInterval(() => void refresh(), 5_000);
     document.addEventListener("visibilitychange", visibilityChanged);
     window.addEventListener("ruli:messages-updated", messageSent);
     return () => {
@@ -176,7 +179,7 @@ export function MessageFeed({
 
   return <div className="message-feed">
     <p className={`feed-status${networkError ? " offline" : ""}`} role="status" aria-live="polite">
-      {networkError || "Новые сообщения появляются автоматически."}
+      {networkError || (aiPending?"AI готовит ответ… Новые сообщения появятся автоматически.":"Новые сообщения появляются автоматически.")}
     </p>
     <ol ref={listRef} onScroll={rememberPosition} className="message-list" aria-label="Сообщения" aria-live="polite" aria-relevant="additions text" aria-atomic="false">
       {messages.map(message => <li key={message.id} data-message-id={message.id} className={message.authorId === viewerMemberId ? "message mine" : "message"}>

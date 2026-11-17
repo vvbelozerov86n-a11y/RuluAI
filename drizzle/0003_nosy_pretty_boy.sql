@@ -1,0 +1,1 @@
+ALTER TABLE `bot_configs` ADD `last_mutation_id` text;

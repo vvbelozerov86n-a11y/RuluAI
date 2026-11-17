@@ -6,6 +6,8 @@ import { taskHref, todayISO, plural, type TaskNode, type Member, type ViewMode }
 import { SubmitButton } from "./submit-button";
 import { MessageComposer } from "./message-composer";
 import { MessageFeed } from "./message-feed";
+import {loadTaskAi} from "@/lib/ruli/ai";
+import {AiChatRetry} from "./ai-task";
 
 function dayNumber(value:string) {return Date.parse(value+"T12:00:00Z")/86400000;}
 function shortDate(value:string) {return new Intl.DateTimeFormat("ru-RU",{day:"numeric",month:"short",timeZone:"Asia/Barnaul"}).format(new Date(value+"T12:00:00Z"));}
@@ -15,6 +17,7 @@ export async function TaskCollaboration({node,members,viewer,channel,mode="view"
   let data=await loadTaskCollaboration(node,viewer,selected);
   const unavailable=Boolean(selected&&!data.channels.some(m=>m.id===selected));
   if(unavailable){selected=undefined;data=await loadTaskCollaboration(node,viewer);}
+  const ai=await loadTaskAi(node,viewer,selected);
   const messageClientId=crypto.randomUUID();
   const manager=canManage(viewer);
   const selectedMember=data.channels.find(m=>m.id===selected);
@@ -36,9 +39,10 @@ export async function TaskCollaboration({node,members,viewer,channel,mode="view"
         {data.channels.map(member=><a key={member.id} href={chatHref(member.id)} aria-current={selected===member.id?"page":undefined}>{member.name}<small>Личный диалог</small></a>)}
       </nav>
       <p className="channel-note">{selectedMember?`Личный диалог: руководитель и ${selectedMember.name}. Остальные участники его не видят.`:"Общий чат видят участники команды, имеющие доступ к задаче."}</p>
-      {selectedMember?.type==="bot"?<p className="channel-note">AI-бот пока не подключён. Сообщения сохраняются; автоматических ответов сейчас нет.</p>:null}
+      {selectedMember?.type==="bot"&&viewer.role==="viewer"?<p className="channel-note">{ai.bots.find(bot=>bot.memberId===selected)?.ready?`В этом диалоге ${selectedMember.name} отвечает автоматически через своего AI-провайдера.`:ai.bots.find(bot=>bot.memberId===selected)?.disabledReason??"Руководитель должен настроить этого бота перед началом диалога."}</p>:null}
       <MessageFeed key={`feed:${viewer.userId}:${node.id}:${selected??"general"}`} taskId={node.id} channelMemberId={selected} viewerMemberId={viewer.memberId} initialMessages={data.messages}/>
-      {viewer.role!=="viewer"?<MessageComposer key={`composer:${viewer.userId}:${node.id}:${selected??"general"}`} taskId={node.id} channelMemberId={selected} viewerUserId={viewer.userId} clientId={messageClientId} mode={mode}/>:<p className="detail-note">У вас доступ для просмотра обсуждения.</p>}
+      {viewer.role!=="viewer"?<MessageComposer key={`composer:${viewer.userId}:${node.id}:${selected??"general"}`} taskId={node.id} channelMemberId={selected} viewerUserId={viewer.userId} clientId={messageClientId} mode={mode} bots={ai.bots} privateBot={selectedMember?.type==="bot"?ai.bots.find(bot=>bot.memberId===selected):undefined}/>:<p className="detail-note">У вас доступ для просмотра обсуждения.</p>}
+      {ai.chatRuns.filter(run=>run.canRetry).slice(0,3).map(run=><AiChatRetry key={run.id} taskId={node.id} run={run} clientId={crypto.randomUUID()}/>)}
       <a className="refresh-link" href={chatHref(selected)}>Обновить сообщения</a>
     </section>
     <section className="collaboration-panel" id="schedule" aria-labelledby="schedule-title">

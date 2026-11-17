@@ -7,6 +7,8 @@ import {OwnerChip,ParticipantCounters,ProgressBar,SignalChip,StateChip,TaskStatu
 import {ResultForm} from "./result-form";
 import {SubmitButton} from "./submit-button";
 import {TaskCollaboration} from "./collaboration";
+import {TaskAiPanel} from "./ai-task";
+import {loadTaskAi} from "@/lib/ruli/ai";
 import {BLOCK_SIZES,ROOT_ID,STATUS_NAMES,isOverdue,peopleOf,plural,progress,stats,taskHref,type Member,type TaskNode,type ViewMode} from "@/lib/ruli/model";
 export {taskHref}; export type {ViewMode};
 export type TaskFilters={q?:string;owner?:string;status?:string;late?:string};
@@ -89,7 +91,7 @@ export function GroupView({node,path,mode,members,today,viewer,flash,error,chann
   </main>;
 }
 
-export function DetailView({node,path,mode,members,today,viewer,flash,error,channel}:ViewProps) {
+export async function DetailView({node,path,mode,members,today,viewer,flash,error,channel}:ViewProps) {
   const owner=members.find(m=>m.id===node.ownerId),parent=path.at(-2)!,status=node.status??"todo",manager=canManage(viewer),people=branchPeople(node,members);
   const canSubmit=manager||(viewer.role==="executor"&&(node.ownerId===viewer.memberId||node.participants.includes(viewer.memberId)));
   return <main className={`workspace${mode==="build"?" is-building":""}`}>
@@ -97,10 +99,11 @@ export function DetailView({node,path,mode,members,today,viewer,flash,error,chan
     <div className="page-heading"><div><h1>{node.title}</h1><p>Конкретное поручение · {owner?.type==="bot"?"Выполняет AI-бот":"Выполняет человек"}</p></div><TaskStatusChip status={status}/></div>
     <nav className="task-jumps" aria-label="Перейти к разделу"><a href="#discussion">Обсуждение</a><a href="#schedule">График выполнения</a></nav>
     <div className="leaf-constructor-bar"><ParticipantCounters human={people.counts.human.length} bot={people.counts.bot.length} title={node.title} people={people.list}/><span>Участники задачи</span>{manager?<div><Link className="secondary" href={`/t/${node.id}/edit?mode=${mode}`}>Изменить блок</Link><form className="inline" action={nestTask}><MutationFields node={node} mode={mode}/><SubmitButton className="secondary">Разбить на подзадачи</SubmitButton></form></div>:null}</div>
-    <div className="detail-layout"><article className="detail-card"><h2>Что нужно сделать</h2><p className="prewrap">{node.description||"Описание пока не заполнено."}</p><div className="section-divider"/><div className="result-label"><h2>Результат</h2><span>{status==="review"?"Ожидает решения руководителя":status==="done"?"Проверено":"Появится после выполнения"}</span></div>
+    <div className="detail-layout"><article className="detail-card"><h2>Что нужно сделать</h2><p className="prewrap">{node.description||"Описание пока не заполнено."}</p>
+      {owner?.type==="bot"?<TaskAiPanel taskId={node.id} version={node.version} data={await loadTaskAi(node,viewer)} manager={manager} clientId={crypto.randomUUID()}/>:null}
+      <div className="section-divider"/><div className="result-label"><h2>Результат</h2><span>{status==="review"?"Ожидает решения руководителя":status==="done"?"Проверено":"Появится после выполнения"}</span></div>
       {node.result?<div className="result-content">{node.result}</div>:<div className="result-empty">Результат ещё не добавлен.</div>}
       {status==="review"&&manager?<div className="detail-actions">{([{value:"done",label:"Принять результат"},{value:"doing",label:"На доработку"}] as const).map(action=><form className="inline" action={setStatus} key={action.value}><MutationFields node={node} mode={mode}/><input type="hidden" name="status" value={action.value}/><SubmitButton className={action.value==="done"?"primary":"secondary"}>{action.label}</SubmitButton></form>)}</div>:status==="done"?<div className="detail-actions"><StateChip className="done" label="Результат принят"/>{manager?<form action={setStatus}><MutationFields node={node} mode={mode}/><input type="hidden" name="status" value="doing"/><SubmitButton className="secondary">Вернуть в работу</SubmitButton></form>:null}</div>:canSubmit&&status!=="review"?<ResultForm node={node} mode={mode}/>:null}
-      {owner?.type==="bot"?<p className="detail-note">AI-бот ещё не подключён. Результат можно добавить вручную; автоматического выполнения сейчас нет.</p>:null}
     </article><aside className="detail-side"><div className="property"><span className="property-label">ИСПОЛНИТЕЛЬ</span>{owner?<OwnerChip member={owner} full/>:null}<p className="detail-note">{owner?.role}</p></div><div className="property"><span className="property-label">СРОК</span><span className="property-value">{node.dueLabel}</span>{isOverdue(node,today)?<StateChip className="overdue" label="Срок прошёл"/>:null}</div><div className="property"><span className="property-label">ЧАСТЬ ЗАДАЧИ</span><Link href={taskHref(parent.id,mode)}>{parent.title} ↗</Link></div><div className="property"><span className="property-label">ПРОВЕРЯЕТ</span><span>Руководитель команды</span></div></aside></div>
     <TaskCollaboration node={node} members={members} viewer={viewer} channel={channel} mode={mode}/>
     <WorkspaceFooter hint="Путь сверху вернёт вас на любой уровень"/>

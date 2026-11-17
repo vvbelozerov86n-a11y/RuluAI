@@ -7,6 +7,7 @@ import { findPath, isISODate } from "../lib/ruli/model";
 import { taskChannelMembers, scheduleSelect, workloadSelect, type ScheduleRow, type ScheduleWorkloadRow } from "../lib/ruli/collaboration";
 import { generateSchedule, scheduleCapacityOnDate, validateScheduleOptions, validateScheduleRange } from "../lib/ruli/scheduling";
 import type { ActionState } from "../lib/ruli/action-state";
+import { validateAiReply, requestAiReply, aiErrorMessage } from "../lib/ruli/ai";
 
 function value(form:FormData,key:string) { return String(form.get(key)??"").trim(); }
 function destination(id:string,channel:string|null=null):string {
@@ -49,13 +50,34 @@ async function postMessage(form:FormData):Promise<ActionState|undefined> {
   }
 }
 export async function sendMessageState(_previous:ActionState,form:FormData):Promise<ActionState> {
+  // The private bot is resolved on the server: removing a hidden field cannot
+  // turn its channel into a human-only conversation or target another bot.
+  const channel=value(form,"channelMemberId")||null;
+  const members=await getMembers();
+  const channelBot=channel ? members.find(member=>member.id===channel&&member.type==="bot") : undefined;
+  const botMemberId=channelBot?.id||value(form,"botMemberId");
+  const aiInput={taskId:value(form,"taskId"),channelMemberId:channel,botMemberId,clientId:value(form,"clientId")};
+  if(botMemberId) {
+    try { await validateAiReply(aiInput); }
+    catch(error) { return failure(form,aiErrorMessage(error)); }
+  }
   const error=await postMessage(form);
   if (error) return error;
-  return {sentClientId:value(form,"clientId")};
+  const acknowledged:ActionState={sentClientId:value(form,"clientId")};
+  if(!botMemberId)return acknowledged;
+  try {
+    const run=await requestAiReply(aiInput);
+    return {...acknowledged,aiRunId:run.id,aiStatus:run.status,notice:run.error||
+      (run.status==="pending"?"AI уже готовит ответ.":run.status==="stale"?"Задача изменилась. Ответ сохранён в истории запусков.":"AI ответил в чате.")};
+  } catch(error) {
+    // The human message is already durable. A provider failure must not keep
+    // its draft around and cause a duplicate message on the next submission.
+    return {...acknowledged,aiStatus:"failed",notice:aiErrorMessage(error)};
+  }
 }
 export async function sendMessage(form:FormData):Promise<void> {
-  const error=await postMessage(form);
-  finish(value(form,"taskId"),error?.error||"Сообщение отправлено",Boolean(error),value(form,"channelMemberId")||null);
+  const state=await sendMessageState({},form);
+  finish(value(form,"taskId"),state.error||state.notice||"Сообщение отправлено",Boolean(state.error)||state.aiStatus==="failed",value(form,"channelMemberId")||null);
 }
 
 export async function generateTaskSchedule(form:FormData):Promise<void> {

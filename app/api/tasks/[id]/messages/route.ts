@@ -3,6 +3,7 @@ import { requireAccess, canReadChannel } from "@/lib/ruli/access";
 import { loadTree, getMembers } from "@/lib/ruli/data";
 import { findPath } from "@/lib/ruli/model";
 import { loadTaskCollaboration, taskChannelMembers } from "@/lib/ruli/collaboration";
+import { loadTaskAi } from "@/lib/ruli/ai";
 
 export const dynamic = "force-dynamic";
 const headers = {"Cache-Control":"private, no-store", "Vary":"Cookie"};
@@ -19,5 +20,7 @@ export async function GET(request:Request,{params}:{params:Promise<{id:string}>}
     return Response.json({error:"Диалог недоступен"},{status:403,headers});
   }
   const {messages}=await loadTaskCollaboration(node,viewer,channel??undefined);
-  return Response.json({messages},{headers});
+  const ai=await loadTaskAi(node,viewer,channel??undefined);
+  const aiPending=ai.chatRuns.filter(run=>run.status==="pending").length;
+  return Response.json({messages,aiPending},{headers});
 }

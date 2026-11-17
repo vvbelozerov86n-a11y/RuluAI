@@ -98,3 +98,47 @@ export const scheduleEntries = sqliteTable("schedule_entries", {
   hours: real("hours").notNull(),
   version: integer("version").notNull().default(1),
 }, t => [index("schedule_plan_idx").on(t.planTaskId), index("schedule_member_dates_idx").on(t.memberId,t.startDate,t.endDate)]);
+
+/** Provider secrets live only in the worker environment. */
+export const botConfigs = sqliteTable("bot_configs", {
+  memberId: text("member_id").primaryKey(),
+  provider: text("provider").notNull(),
+  model: text("model").notNull(),
+  systemPrompt: text("system_prompt").notNull().default(""),
+  enabled: integer("enabled", {mode:"boolean"}).notNull().default(false),
+  version: integer("version").notNull().default(1),
+  updatedAt: text("updated_at").notNull(),
+  lastMutationId: text("last_mutation_id"),
+});
+
+/** A logical request is deduplicated across retries. Leases fence old workers. */
+export const aiRuns = sqliteTable("ai_runs", {
+  id: text("id").primaryKey(),
+  requestKey: text("request_key").notNull(),
+  activeKey: text("active_key"),
+  leaseToken: text("lease_token").notNull(),
+  leaseExpiresAt: text("lease_expires_at").notNull(),
+  kind: text("kind").notNull(),
+  taskId: text("task_id").notNull(),
+  channelMemberId: text("channel_member_id"),
+  botMemberId: text("bot_member_id").notNull(),
+  requesterUserId: text("requester_user_id").notNull(),
+  requesterMemberId: text("requester_member_id").notNull(),
+  inputMessageId: text("input_message_id"),
+  taskVersion: integer("task_version").notNull(),
+  configVersion: integer("config_version").notNull(),
+  provider: text("provider").notNull(),
+  model: text("model").notNull(),
+  status: text("status").notNull().default("pending"),
+  output: text("output"),
+  error: text("error"),
+  inputTokens: integer("input_tokens"),
+  outputTokens: integer("output_tokens"),
+  createdAt: text("created_at").notNull(),
+  finishedAt: text("finished_at"),
+}, t => [
+  uniqueIndex("ai_run_request_idx").on(t.requestKey),
+  uniqueIndex("ai_run_active_idx").on(t.activeKey),
+  index("ai_run_channel_idx").on(t.taskId,t.channelMemberId,t.createdAt),
+  index("ai_run_requester_idx").on(t.requesterUserId,t.status,t.leaseExpiresAt),
+]);

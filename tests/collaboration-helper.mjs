@@ -18,7 +18,7 @@ export class TestRedirect extends Error {
   constructor(url) { super(`Redirect: ${url}`); this.url = url; }
 }
 
-function loadModule(relative, bindings, exports) {
+export function loadModule(relative, bindings, exports) {
   const source = stripTypeScriptTypes(fs.readFileSync(path.join(project, relative), "utf8"))
     .replace(/^import[\s\S]*?from\s+["'][^"']+["'];\s*/gm, "")
     .replace(/^export\s*\{[^}]*\}\s*from\s*["'][^"']+["'];?\s*/gm, "")
@@ -154,7 +154,7 @@ export function collaborationHarness() {
     catch (error) { if (error instanceof TestRedirect) return { redirect: error.url }; throw error; }
   }
   return {
-    sqlite, db, queried, hooks, env, identities, access, collaboration, actions, invoke, getMembers, loadTree, seedTask,
+    sqlite, db, queried, hooks, env, identities, access, collaboration, actions, invoke, getMembers, loadTree, seedTask, common,
     as(key) { identity = typeof key === "string" ? identities[key] : key; },
     all(sql, ...values) { return sqlite.prepare(sql).all(...values).map((row) => ({ ...row })); },
     one(sql, ...values) { const row = sqlite.prepare(sql).get(...values); return row ? { ...row } : null; },
