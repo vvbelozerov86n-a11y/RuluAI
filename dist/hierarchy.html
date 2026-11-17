@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Задачи блоками: от крупных целей до поручений людям и Grok.">
+  <title>Рули — задачи по уровням</title>
+  <link rel="stylesheet" href="hierarchy.css">
+  <link rel="stylesheet" href="builder.css">
+</head>
+<body>
+  <header class="topbar">
+    <a href="#" class="brand" aria-label="Рули — все задачи"><span class="brand-mark"><i></i><i></i><i></i></span>рули<span class="brand-dot">.</span></a>
+    <span class="workspace-label">Моя команда</span>
+    <div class="topbar-right"><span class="prototype-label">Интерактивный макет</span><button class="team-button" id="teamButton" aria-label="Открыть команду"><span class="avatar small">ВЫ</span></button></div>
+  </header>
+  <main class="workspace">
+    <div class="navigation-row"><button id="backButton" class="back-button" aria-label="На уровень выше"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6-6 6 6 6"/></svg></button><nav id="breadcrumbs" aria-label="Путь задачи"></nav><span id="depth" class="depth"></span></div>
+    <div id="content"></div>
+    <footer class="workspace-footer"><span id="saveHint"><i class="quiet-dot"></i>Черновик сохраняется в этом браузере</span><span id="footerHint">Нажмите на блок, чтобы увидеть подзадачи <span aria-hidden="true">↘</span></span></footer>
+  </main>
+  <dialog id="dialog"></dialog>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script src="hierarchy.js"></script>
+  <script src="builder.js"></script>
+</body>
+</html>
