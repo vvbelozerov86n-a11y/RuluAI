@@ -2,6 +2,7 @@
 import { redirect } from "next/navigation";
 import { getD1 } from "../db";
 import { requireAccess, canManage, canWriteChannel } from "../lib/ruli/access";
+import { taskPagePath } from "../lib/ruli/return-path";
 import { loadTree, getMembers } from "../lib/ruli/data";
 import { findPath, isISODate } from "../lib/ruli/model";
 import { taskChannelMembers, scheduleSelect, workloadSelect, type ScheduleRow, type ScheduleWorkloadRow } from "../lib/ruli/collaboration";
@@ -21,8 +22,8 @@ function failure(form:FormData,message:string):ActionState {
   return {error:message,values:Object.fromEntries([...form.entries()].filter((e):e is [string,string]=>typeof e[1]==="string"))};
 }
 async function postMessage(form:FormData):Promise<ActionState|undefined> {
-  const viewer=await requireAccess();
   const taskId=value(form,"taskId");
+  const viewer=await requireAccess(taskPagePath(taskId));
   const channel=value(form,"channelMemberId")||null;
   const body=value(form,"body");
   const clientId=value(form,"clientId");
@@ -81,8 +82,8 @@ export async function sendMessage(form:FormData):Promise<void> {
 }
 
 export async function generateTaskSchedule(form:FormData):Promise<void> {
-  const viewer=await requireAccess();
   const id=value(form,"taskId");
+  const viewer=await requireAccess(taskPagePath(id));
   if (!canManage(viewer)) finish(id,"График формирует руководитель",true);
   const tree=await loadTree();
   const node=findPath(id,tree)?.at(-1);
@@ -127,8 +128,8 @@ export async function generateTaskSchedule(form:FormData):Promise<void> {
 }
 
 export async function updateScheduleEntry(form:FormData):Promise<void> {
-  const viewer=await requireAccess();
   const taskId=value(form,"taskId");
+  const viewer=await requireAccess(taskPagePath(taskId));
   if (!canManage(viewer)) finish(taskId,"Изменять график может руководитель",true);
   const tree=await loadTree();
   if (!findPath(taskId,tree)) finish("root","Задача не найдена",true);
@@ -169,8 +170,8 @@ export async function updateScheduleEntry(form:FormData):Promise<void> {
 }
 
 export async function clearTaskSchedule(form:FormData):Promise<void> {
-  const viewer=await requireAccess();
   const taskId=value(form,"taskId");
+  const viewer=await requireAccess(taskPagePath(taskId));
   if (!canManage(viewer)) finish(taskId,"Удалять график может руководитель",true);
   if (value(form,"confirmClear")!=="yes") finish(taskId,"Подтвердите удаление графика и ручных правок.",true);
   const tree=await loadTree();

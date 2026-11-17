@@ -17,6 +17,7 @@ import {
   progress,
   stats,
   todayISO,
+  taskHref,
   validateDueDateInput,
 } from "../lib/ruli/model.ts";
 
@@ -202,4 +203,12 @@ test("имена свойств прототипа не проходят вал�
     assert.equal(isBlockSize(value), false);
     assert.equal(isBlockTheme(value), false);
   }
+});
+
+test("taskHref кодирует идентификатор и оставляет корень на главной", () => {
+  assert.equal(taskHref("root"), "/");
+  assert.equal(taskHref("launch"), "/t/launch");
+  assert.equal(taskHref("launch", "build"), "/t/launch?mode=build");
+  assert.equal(taskHref("a/b"), "/t/a%2Fb");
+  assert.equal(taskHref("a/b", "view"), "/t/a%2Fb?mode=view");
 });

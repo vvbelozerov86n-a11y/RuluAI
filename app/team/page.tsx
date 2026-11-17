@@ -10,7 +10,7 @@ import {loadBotSettings} from "@/lib/ruli/ai";
 export const dynamic="force-dynamic";
 export const metadata={title:"Команда"};
 export default async function TeamPage({searchParams}:{searchParams:Promise<Record<string,string|string[]|undefined>>}) {
-  const viewer=await requireAccess(),params=await searchParams,members=await getMembers(),manager=canManage(viewer),accounts=manager?await listAccessAccounts():[];
+  const viewer=await requireAccess("/team"),params=await searchParams,members=await getMembers(),manager=canManage(viewer),accounts=manager?await listAccessAccounts():[];
   return <main className="workspace"><div className="editor-page"><div className="editor-topline"><Link className="editor-back" href="/">← Ко всем задачам</Link><span className="editor-eyebrow">ЛЮДИ И AI-БОТЫ</span></div><div className="editor-panel">
     <h1>Команда</h1><p>Ответственные и участники назначаются на каждую задачу.</p><Toasts flash={typeof params.flash==="string"?params.flash:undefined} error={typeof params.error==="string"?params.error:undefined}/>
     {members.map(member=><div className="member-row" key={member.id}><Avatar member={member}/><div>{member.name}<small>{member.role} · {member.type==="bot"?"AI-бот":"Человек"}</small></div></div>)}

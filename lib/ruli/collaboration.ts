@@ -1,5 +1,6 @@
 import { getD1 } from "../../db";
 import { requireAccess, canManage, canReadChannel, type AccessContext } from "./access";
+import { taskPagePath } from "./return-path";
 import { getMembers } from "./data";
 import { peopleOf, type TaskNode, type Member } from "./model";
 import type { ScheduleEntry } from "./scheduling";
@@ -32,7 +33,7 @@ export const workloadSelect = `SELECT s.id,s.plan_task_id AS planTaskId,s.task_i
   WHERE t.deleted_at IS NULL AND p.deleted_at IS NULL AND t.kind='leaf' AND t.status<>'done'`;
 
 export async function loadTaskCollaboration(node:TaskNode,_viewer:AccessContext,channelMemberId?:string) {
-  const viewer=await requireAccess();
+  const viewer=await requireAccess(taskPagePath(node.id));
   const members=await getMembers();
   const channels=taskChannelMembers(node,members,viewer);
   const selected=channelMemberId && channelMemberId!=="general" ? channelMemberId : null;

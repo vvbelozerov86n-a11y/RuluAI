@@ -29,7 +29,9 @@ test("catalog exposes exactly the supported providers and deploy-time key names"
   assert.deepEqual(AI_PROVIDERS.map(({ id, keyName }) => ({ id, keyName })), [
     { id: "xai", keyName: "XAI_API_KEY" }, { id: "openai", keyName: "OPENAI_API_KEY" },
   ]);
-  assert.ok(AI_PROVIDERS.every(item => item.label && item.defaultModel));
+  assert.ok(AI_PROVIDERS.every(item => item.label && item.defaultModel && item.suggestedModels.includes(item.defaultModel)));
+  assert.equal(AI_PROVIDERS[0].defaultModel, "grok-4.7");
+  assert.deepEqual([...AI_PROVIDERS[0].suggestedModels], ["grok-4.7", "grok-4.6", "grok-4.5", "grok-4.3"]);
 });
 
 for (const provider of ["xai", "openai"]) {

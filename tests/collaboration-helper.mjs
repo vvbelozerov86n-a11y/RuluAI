@@ -11,6 +11,7 @@ import { DatabaseSync } from "node:sqlite";
 import * as model from "../lib/ruli/model.ts";
 import * as scheduling from "../lib/ruli/scheduling.ts";
 import * as policy from "../lib/ruli/policy.ts";
+import * as returnPath from "../lib/ruli/return-path.ts";
 
 const project = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -144,7 +145,7 @@ export function collaborationHarness() {
     for (const node of nodes.values()) if (node.parentId) nodes.get(node.parentId)?.children.push(node);
     return nodes.get("root");
   }
-  const common = { ...model, ...policy, ...access, getD1: () => db, getMembers, loadTree };
+  const common = { ...model, ...policy, ...access, ...returnPath, getD1: () => db, getMembers, loadTree };
   const collaboration = loadModule("lib/ruli/collaboration.ts", common, ["taskChannelMembers", "scheduleSelect", "workloadSelect", "loadTaskCollaboration"]);
   const actions = loadModule("app/collaboration-actions.ts", { ...common, ...collaboration, ...scheduling }, ["sendMessageState", "sendMessage", "generateTaskSchedule", "updateScheduleEntry", "clearTaskSchedule"]);
   const teamActions = loadModule("app/team-actions.ts", common, ["addTeamMember"]);

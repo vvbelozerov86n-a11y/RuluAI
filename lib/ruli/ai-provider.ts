@@ -1,13 +1,15 @@
 /** Server-side HTTP adapter with no runtime/framework imports.
- * Official API contracts checked 2026-11-17:
+ * Official API contracts checked 2026-11-18:
  * https://docs.x.ai/developers/rest-api-reference/inference/responses
  * https://developers.openai.com/api/reference/resources/responses/methods/create
  */
 export type AiProvider = "xai" | "openai";
 
 export const AI_PROVIDERS = [
-  { id: "xai", label: "xAI · Grok", keyName: "XAI_API_KEY", defaultModel: "grok-4.7" },
-  { id: "openai", label: "OpenAI", keyName: "OPENAI_API_KEY", defaultModel: "gpt-6-luna" },
+  { id: "xai", label: "xAI · Grok", keyName: "XAI_API_KEY", defaultModel: "grok-4.7",
+    suggestedModels: ["grok-4.7", "grok-4.6", "grok-4.5", "grok-4.3"] },
+  { id: "openai", label: "OpenAI", keyName: "OPENAI_API_KEY", defaultModel: "gpt-6-luna",
+    suggestedModels: ["gpt-6-luna"] },
 ] as const;
 
 export type AiTextRequest = {

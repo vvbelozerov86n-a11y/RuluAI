@@ -5,6 +5,7 @@ import { getMembers, loadTree } from "./data";
 import { canManage, canReadChannel, canSubmit, canWriteChannel, type AccessContext } from "./policy";
 import { findPath, peopleOf, type Member, type TaskNode } from "./model";
 import { AI_PROVIDERS, generateAiText, safeAiErrorMessage, type AiProvider } from "./ai-provider";
+import { taskPagePath } from "./return-path";
 
 export type AiStatus = "pending" | "succeeded" | "failed" | "stale";
 export type TaskBot = {
@@ -101,8 +102,13 @@ export function createAiEngine(deps: AiDependencies) {
     return { memberId, name, provider, model, enabled, configured, ready, disabledReason };
   }
   function summary(run: RunRow, viewer: AccessContext): AiRunSummary {
-    const { leaseToken: _lease, leaseExpiresAt: _expiry, taskVersion: _task, configVersion: _config, ...result } = run;
-    return { ...result, canRetry: run.kind === "chat" && run.status === "failed" && run.requesterUserId === viewer.userId && viewer.role !== "viewer" };
+    return {
+      id: run.id, status: run.status, kind: run.kind, taskId: run.taskId,
+      channelMemberId: run.channelMemberId, botMemberId: run.botMemberId,
+      requesterUserId: run.requesterUserId, inputMessageId: run.inputMessageId,
+      createdAt: run.createdAt, finishedAt: run.finishedAt, output: run.output, error: run.error,
+      canRetry: run.kind === "chat" && run.status === "failed" && run.requesterUserId === viewer.userId && viewer.role !== "viewer",
+    };
   }
   async function expireLeases() {
     await db.prepare(`UPDATE ai_runs SET status='failed',active_key=NULL,
@@ -118,7 +124,7 @@ export function createAiEngine(deps: AiDependencies) {
     safeId(input.taskId, "Задача");
     safeId(input.botMemberId, "Бот");
     if (!CLIENT_ID.test(input.clientId)) throw new AiError("Обновите форму перед запуском AI.");
-    const viewer = await deps.requireAccess(`/t/${input.taskId}`);
+    const viewer = await deps.requireAccess(taskPagePath(input.taskId));
     const tree = await deps.loadTree();
     const node = findPath(input.taskId, tree)?.at(-1);
     if (!node) throw new AiError("Задача удалена или недоступна.");
@@ -326,7 +332,7 @@ export function createAiEngine(deps: AiDependencies) {
   }
 
   async function loadTaskAi(node: TaskNode, _viewer: AccessContext, selectedChannel?: string | null) {
-    const viewer = await deps.requireAccess(`/t/${node.id}`);
+    const viewer = await deps.requireAccess(taskPagePath(node.id));
     const current = findPath(node.id, await deps.loadTree())?.at(-1);
     if (!current) throw new AiError("Задача удалена или недоступна.");
     const members = await deps.getMembers();

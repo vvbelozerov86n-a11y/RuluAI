@@ -37,8 +37,8 @@ export type ViewMode = "view" | "build";
 
 /** Ссылка на страницу задачи (корень живёт на «/»). */
 export function taskHref(id: string, mode?: ViewMode): string {
-  const base = id === ROOT_ID ? "/" : `/t/${id}`;
-  return mode ? `${base}${base.includes("?") ? "&" : "?"}mode=${mode}` : base;
+  const base = id === ROOT_ID ? "/" : `/t/${encodeURIComponent(id)}`;
+  return mode ? `${base}?mode=${mode}` : base;
 }
 export const MAX_NODES = 500;
 export const MAX_DEPTH = 20;
