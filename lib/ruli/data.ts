@@ -26,6 +26,7 @@ export const loadTree = cache(async (): Promise<TaskNode> => {
     byId.set(row.id, {
       id:row.id,parentId:row.parentId,kind:row.kind === "group" ? "group" : "leaf",
       title:row.title,ownerId:row.ownerId,status:row.status as TaskNode["status"],
+      priority:(row.priority==="high"||row.priority==="medium"||row.priority==="low"?row.priority:null),
       dueLabel:row.dueDate ? dueLabelFromISO(row.dueDate) : "Без срока",dueDate:row.dueDate,
       description:row.description,result:row.result,size:row.size as TaskNode["size"],theme:row.theme as TaskNode["theme"],
       position:row.position,version:row.version,deletedAt:row.deletedAt,splitSourceId:row.splitSourceId,

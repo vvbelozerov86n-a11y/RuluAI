@@ -5,5 +5,10 @@ declare namespace Cloudflare {
     RULI_OWNER_EMAIL?: string;
     XAI_API_KEY?: string;
     OPENAI_API_KEY?: string;
+    GROK_BOT_WEBHOOK_URL?: string;
+    GROK_BOT_WEBHOOK_KEY?: string;
+    GROK_BOT_WEBHOOK_HEADER?: string;
+    RULI_BOT_API_TOKEN?: string;
+    RULI_BASE_URL?: string;
   }
 }

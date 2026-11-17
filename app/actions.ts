@@ -9,10 +9,11 @@ import type { ActionState } from "../lib/ruli/action-state";
 import { runMutation, type Statement } from "../lib/ruli/mutations";
 import { taskScheduleConflict } from "../lib/ruli/task-schedule";
 import {
-  countNodes, findPath, isBlockSize, isBlockTheme, isTaskStatus,
+  countNodes, findPath, isBlockSize, isBlockTheme, isTaskPriority, isTaskStatus,
   MAX_DEPTH, MAX_NODES, ROOT_ID, validateDueDateInput, dueLabelFromISO,
-  taskHref, type TaskNode,
+  taskHref, type TaskNode, type TaskPriority,
 } from "../lib/ruli/model";
+import { notifyTaskChangeForAgents, retryAgentDelivery } from "../lib/ruli/agent-runtime";
 
 const CONFLICT = "Задача изменилась в другой вкладке или у другого участника. Ваш текст сохранён в форме. Обновите данные перед повторной отправкой.";
 const ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
@@ -87,7 +88,13 @@ async function fields(form: FormData) {
   const size = str(form, "size");
   const theme = str(form, "theme");
   if (!isBlockSize(size) || !isBlockTheme(theme)) throw new FormError("Выберите форму и цвет карточки задачи.");
-  return { title, description, ownerId, participants, size, theme, dueDate: due.date, dueLabel: due.date ? dueLabelFromISO(due.date) : "Без срока" };
+  const priorityRaw = str(form, "priority");
+  let priority: TaskPriority | null = null;
+  if (priorityRaw) {
+    if (!isTaskPriority(priorityRaw)) throw new FormError("Выберите приоритет: высокий, средний или низкий.", { priority: "Недопустимый приоритет." });
+    priority = priorityRaw;
+  }
+  return { title, description, ownerId, participants, size, theme, priority, dueDate: due.date, dueLabel: due.date ? dueLabelFromISO(due.date) : "Без срока" };
 }
 
 function participantWrites(id: string, participants: string[], gate: Statement, replace: boolean): Statement[] {
@@ -156,11 +163,15 @@ const create: Operation = async form => {
     id: parentId, version: parentVersion,
     guard: { sql: "kind = 'group' AND (SELECT COUNT(*) FROM tasks WHERE deleted_at IS NULL) < ?", params: [MAX_NODES] },
     statements: gate => [{
-      sql: `INSERT INTO tasks (id,parent_id,kind,title,owner_id,status,due_label,due_date,description,result,size,theme,position)
-        SELECT ?,?,?,?,?,?,?,?,?,?,?,?,COALESCE((SELECT MAX(position)+1 FROM tasks WHERE parent_id=? AND deleted_at IS NULL),0) WHERE ${gate.sql}`,
-      params: [id,parentId,nested ? "group" : "leaf",f.title,f.ownerId,nested ? null : "todo",f.dueLabel,f.dueDate,f.description,"",f.size,f.theme,parentId,...gate.params],
+      sql: `INSERT INTO tasks (id,parent_id,kind,title,owner_id,status,priority,due_label,due_date,description,result,size,theme,position)
+        SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,COALESCE((SELECT MAX(position)+1 FROM tasks WHERE parent_id=? AND deleted_at IS NULL),0) WHERE ${gate.sql}`,
+      params: [id,parentId,nested ? "group" : "leaf",f.title,f.ownerId,nested ? null : "todo",f.priority,f.dueLabel,f.dueDate,f.description,"",f.size,f.theme,parentId,...gate.params],
     }, ...participantWrites(id, f.participants, gate, false)],
   }));
+  await notifyTaskChangeForAgents(getD1(), null, {
+    id, title: f.title, description: f.description, status: nested ? null : "todo",
+    priority: f.priority, due: f.dueDate, parentId, ownerId: f.ownerId, participants: f.participants,
+  });
   return { id, message: nested ? "Группа задач создана — добавьте подзадачи." : "Задача создана." };
 };
 
@@ -178,7 +189,7 @@ const update: Operation = async form => {
   await ensureChanged(await runMutation(db, {
     id: node.id, version,
     guard: reassign ? scheduleVersionGuard(tree.version) : undefined,
-    set: { sql: "title=?,owner_id=?,size=?,theme=?,due_date=?,due_label=?,description=?", params: [f.title,f.ownerId,f.size,f.theme,f.dueDate,f.dueLabel,f.description] },
+    set: { sql: "title=?,owner_id=?,size=?,theme=?,priority=?,due_date=?,due_label=?,description=?", params: [f.title,f.ownerId,f.size,f.theme,f.priority,f.dueDate,f.dueLabel,f.description] },
     statements: (gate, token) => [
       ...participantWrites(node.id, f.participants, gate, true),
       ...(reassign ? [{
@@ -191,6 +202,15 @@ const update: Operation = async form => {
       }] : []),
     ],
   }));
+  await notifyTaskChangeForAgents(getD1(), {
+    id: node.id, title: node.title, description: node.description, status: node.status,
+    priority: node.priority ?? null, due: node.dueDate, parentId: node.parentId,
+    ownerId: node.ownerId, participants: node.participants,
+  }, {
+    id: node.id, title: f.title, description: f.description, status: node.status,
+    priority: f.priority, due: f.dueDate, parentId: node.parentId,
+    ownerId: f.ownerId, participants: f.participants,
+  });
   return { id: node.id, message: node.kind === "group" ? "Группа задач обновлена." : "Задача обновлена." };
 };
 
@@ -307,9 +327,9 @@ export async function nestTask(form: FormData): Promise<void> {
       guard:{sql:"kind='leaf' AND (SELECT COUNT(*) FROM tasks WHERE deleted_at IS NULL) < ?",params:[MAX_NODES]},
       set:{sql:"kind='group',status=NULL,result=''",params:[]},
       statements:gate => [{
-        sql:`INSERT INTO tasks (id,parent_id,kind,title,owner_id,status,due_label,due_date,description,result,size,theme,position,split_source_id)
-          SELECT ?,?,'leaf',?,?,?,?,?,?,?,'small',?,0,? WHERE ${gate.sql}`,
-        params:[childId,node.id,node.title,node.ownerId,node.status ?? "todo",node.dueLabel,node.dueDate,node.description,node.result,node.theme,node.id,...gate.params],
+        sql:`INSERT INTO tasks (id,parent_id,kind,title,owner_id,status,priority,due_label,due_date,description,result,size,theme,position,split_source_id)
+          SELECT ?,?,'leaf',?,?,?,?,?,?,?,?,'small',?,0,? WHERE ${gate.sql}`,
+        params:[childId,node.id,node.title,node.ownerId,node.status ?? "todo",node.priority ?? null,node.dueLabel,node.dueDate,node.description,node.result,node.theme,node.id,...gate.params],
       },{
         sql:`INSERT INTO task_participants (task_id,member_id) SELECT ?,member_id FROM task_participants WHERE task_id=? AND ${gate.sql}`,
         params:[childId,node.id,...gate.params],
@@ -347,7 +367,7 @@ export async function unnestTask(form: FormData): Promise<void> {
         AND NOT EXISTS (SELECT 1 FROM task_messages WHERE task_id=?)
         AND NOT EXISTS (SELECT 1 FROM schedule_entries WHERE plan_task_id=?)
         AND NOT EXISTS (SELECT 1 FROM schedule_plans WHERE task_id=?)`,params:[node.id,child.id,child.version,node.id,child.id,child.id,child.id]},
-      set:{sql:"kind='leaf',title=?,owner_id=?,status=?,due_label=?,due_date=?,description=?,result=?",params:[child.title,child.ownerId,child.status,child.dueLabel,child.dueDate,child.description,child.result]},
+      set:{sql:"kind='leaf',title=?,owner_id=?,status=?,priority=?,due_label=?,due_date=?,description=?,result=?",params:[child.title,child.ownerId,child.status,child.priority ?? null,child.dueLabel,child.dueDate,child.description,child.result]},
       statements:(gate,token)=>[...participantWrites(node.id,child.participants,gate,true),{
         sql:`UPDATE schedule_entries SET task_id=?,version=version+1 WHERE task_id=? AND ${gate.sql}`,
         params:[node.id,child.id,...gate.params],
@@ -417,4 +437,16 @@ export async function listChildren(parentId: string) {
   await requireAccess(taskHref(parentId));
   const tree = await loadTree();
   return findPath(parentId,tree)?.at(-1)?.children ?? [];
+}
+
+export async function retryBotWebhook(form: FormData): Promise<void> {
+  return ordinary(form, async form => {
+    await access(form);
+    const id = taskId(form);
+    const eventId = str(form, "eventId");
+    if (!/^[a-zA-Z0-9_-]+$/.test(eventId)) throw new FormError("Событие не найдено.");
+    const row = await retryAgentDelivery(getD1(), eventId);
+    if (!row) throw new FormError("Событие не найдено.");
+    return { id, message: row.status === "delivered" ? "Событие повторно передано боту." : "Не удалось повторно передать событие боту." };
+  });
 }

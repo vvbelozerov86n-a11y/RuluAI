@@ -6,6 +6,7 @@
 
 export type MemberType = "human" | "bot";
 export type TaskStatus = "todo" | "doing" | "review" | "done";
+export type TaskPriority = "high" | "medium" | "low";
 export type TaskKind = "group" | "leaf";
 export type BlockSize = "small" | "wide" | "tall" | "large";
 export type BlockTheme = "teal" | "blue" | "cream" | "slate" | "graphite";
@@ -15,6 +16,12 @@ export const STATUS_NAMES: Record<TaskStatus, string> = {
   doing: "В работе",
   review: "На проверке",
   done: "Готово",
+};
+
+export const PRIORITY_NAMES: Record<TaskPriority, string> = {
+  high: "Высокий",
+  medium: "Средний",
+  low: "Низкий",
 };
 
 export const BLOCK_SIZES: Record<BlockSize, { label: string; w: 1 | 2; h: 1 | 2 }> = {
@@ -61,6 +68,7 @@ export type TaskNode = {
   title: string;
   ownerId: string;
   status: TaskStatus | null;
+  priority: TaskPriority | null;
   dueLabel: string;
   dueDate: string | null;
   description: string;
@@ -80,6 +88,10 @@ export type TreeStats = { total: number; done: number; review: number; late: num
 
 export function isTaskStatus(value: unknown): value is TaskStatus {
   return value === "todo" || value === "doing" || value === "review" || value === "done";
+}
+
+export function isTaskPriority(value: unknown): value is TaskPriority {
+  return value === "high" || value === "medium" || value === "low";
 }
 
 export function isBlockSize(value: unknown): value is BlockSize {

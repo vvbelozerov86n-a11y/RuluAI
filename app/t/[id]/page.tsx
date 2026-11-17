@@ -5,6 +5,8 @@ import {getMembers,loadTree} from "@/lib/ruli/data";
 import {findPath,todayISO} from "@/lib/ruli/model";
 import {requireAccess,canManage} from "@/lib/ruli/access";
 import {taskPagePath} from "@/lib/ruli/return-path";
+import {listTaskDeliveries} from "@/lib/ruli/agent-runtime";
+import {getD1} from "@/db";
 export const dynamic="force-dynamic";
 type PageProps={params:Promise<{id:string}>;searchParams:Promise<Record<string,string|string[]|undefined>>};
 const one=(v:string|string[]|undefined)=>typeof v==="string"?v:undefined;
@@ -20,7 +22,8 @@ export default async function TaskPage({params,searchParams}:PageProps) {
   const path=findPath(id,tree);if(!path)notFound();
   const node=path.at(-1)!,mode:ViewMode=query.mode==="build"&&canManage(viewer)?"build":"view";
   const layout:OverviewLayout=query.layout==="cards"?"cards":"list";
-  const common={path,members,mode,layout,today:todayISO(),viewer,flash:one(query.flash),error:one(query.error),channel:one(query.chat)};
+  const deliveries=node.kind==="leaf"?await listTaskDeliveries(getD1(),node.id):[];
+  const common={path,members,mode,layout,today:todayISO(),viewer,flash:one(query.flash),error:one(query.error),channel:one(query.chat),deliveries};
   return node.kind==="group"?<GroupView node={node} {...common}/>:<DetailView node={node} {...common}/>;
 }
 

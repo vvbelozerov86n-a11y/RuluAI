@@ -32,7 +32,8 @@ function ConnectionCheck({provider,model}:{provider:Settings["providers"][number
 
 function ConnectionGuide({providers}:{providers:Settings["providers"]}) {
   const id=useId();
-  const [providerId,setProviderId]=useState<string>(providers[0].id);
+  const llm=providers.filter(provider=>provider.kind!=="agent");
+  const [providerId,setProviderId]=useState<string>(llm[0]?.id??providers[0].id);
   const selected=providers.find(provider=>provider.id===providerId)!;
   const [model,setModel]=useState<string>(selected.defaultModel);
   const [copyStatus,setCopyStatus]=useState("");
@@ -46,8 +47,8 @@ function ConnectionGuide({providers}:{providers:Settings["providers"]}) {
     <p>Понадобится API-ключ Grok или OpenAI и доступ владельца сайта к настройкам Sites.</p>
     <ol className="ai-setup-steps">
       <li><h4>Создайте ключ у провайдера</h4>
-        <label htmlFor={`${id}-provider`}>Провайдер<select id={`${id}-provider`} value={providerId} onChange={event=>{const next=providers.find(provider=>provider.id===event.target.value)!;setProviderId(next.id);setModel(next.defaultModel);setCopyStatus("");setSelectionVersion(value=>value+1);}}>{providers.map(provider=><option key={provider.id} value={provider.id}>{provider.label}</option>)}</select></label>
-        <p><a href={keyPages[selected.id]} target="_blank" rel="noopener noreferrer">Открыть API Keys {selected.label} <span className="ai-setup-note">(новая вкладка)</span></a></p>
+        <label htmlFor={`${id}-provider`}>Провайдер<select id={`${id}-provider`} value={providerId} onChange={event=>{const next=llm.find(provider=>provider.id===event.target.value)!;setProviderId(next.id);setModel(next.defaultModel);setCopyStatus("");setSelectionVersion(value=>value+1);}}>{llm.map(provider=><option key={provider.id} value={provider.id}>{provider.label}</option>)}</select></label>
+        {selected.id==="xai"||selected.id==="openai"?<p><a href={keyPages[selected.id]} target="_blank" rel="noopener noreferrer">Открыть API Keys {selected.label} <span className="ai-setup-note">(новая вкладка)</span></a></p>:null}
         <p className="ai-setup-note">Войдите в аккаунт, выберите проект или команду и создайте API-ключ. Убедитесь, что у аккаунта есть доступ к выбранной модели и API-лимит.</p>
       </li>
       <li><h4>Добавьте секрет в Sites</h4>
@@ -75,31 +76,51 @@ function BotForm({bot,providers}:{bot?:Bot;providers:Settings["providers"]}) {
   const [role,setRole]=useState(bot?.role??"");
   const [provider,setProvider]=useState<string>(bot?.provider??providers[0].id);
   const [model,setModel]=useState(bot?.model??providers[0].defaultModel);
+  const [slug,setSlug]=useState(bot?.slug??"");
   const [instructions,setInstructions]=useState(bot?.systemPrompt??"");
   const [enabled,setEnabled]=useState(bot?.enabled??false);
   const selected=providers.find(item=>item.id===provider)!;
+  const agent=selected.kind==="agent";
   return <form className="ai-settings-form" action={action}>
     <input type="hidden" name="memberId" value={bot?.memberId??""}/>
     <input type="hidden" name="version" value={bot?.version??0}/>
     <div className="form-pair"><label htmlFor={`${id}-name`}>Имя бота<input id={`${id}-name`} name="name" value={name} onChange={e=>setName(e.target.value)} required maxLength={120} placeholder="Например, Аналитик"/></label><label htmlFor={`${id}-role`}>Роль в команде<input id={`${id}-role`} name="role" value={role} onChange={e=>setRole(e.target.value)} maxLength={120} placeholder="Например, исследование рынка"/></label></div>
-    <div className="form-pair"><label htmlFor={`${id}-provider`}>AI-провайдер<select id={`${id}-provider`} name="provider" value={provider} onChange={e=>{const next=providers.find(item=>item.id===e.target.value)!;setProvider(next.id);setModel(next.defaultModel);}}>{providers.map(item=><option key={item.id} value={item.id}>{item.label}</option>)}</select></label><label htmlFor={`${id}-model`}>Модель<input id={`${id}-model`} name="model" list={`${id}-models`} value={model} onChange={e=>setModel(e.target.value)} required maxLength={128} spellCheck={false} autoCapitalize="none"/></label></div>
-    {selected.suggestedModels.length?<datalist id={`${id}-models`}>{selected.suggestedModels.map(item=><option key={item} value={item}/>)}</datalist>:null}
-    <p className="detail-note">Используйте идентификатор модели, доступной в аккаунте выбранного провайдера. Для xAI · Grok текущая модель по умолчанию — {selected.id==="xai"?selected.defaultModel:"указанная в кабинете"}.</p>
+    <div className="form-pair"><label htmlFor={`${id}-provider`}>Провайдер<select id={`${id}-provider`} name="provider" value={provider} onChange={e=>{const next=providers.find(item=>item.id===e.target.value)!;setProvider(next.id);setModel(next.defaultModel||"-");}}>{providers.map(item=><option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
+      {agent?<label htmlFor={`${id}-slug`}>Идентификатор (slug)<input id={`${id}-slug`} name="slug" list={`${id}-slugs`} value={slug} onChange={e=>setSlug(e.target.value)} required maxLength={64} spellCheck={false} autoCapitalize="none" placeholder="например, vk"/></label>
+        :<label htmlFor={`${id}-model`}>Модель<input id={`${id}-model`} name="model" list={`${id}-models`} value={model} onChange={e=>setModel(e.target.value)} required maxLength={128} spellCheck={false} autoCapitalize="none"/></label>}
+    </div>
+    {agent?<input type="hidden" name="model" value={model||"-"}/>:null}
+    {agent?<datalist id={`${id}-slugs`}><option value="pinterest"/><option value="vk"/><option value="dzen"/><option value="telegram"/><option value="video"/><option value="reviews"/><option value="review-replies"/><option value="site-seo"/><option value="game-tester"/><option value="animation"/><option value="grok-bot"/></datalist>:null}
+    {!agent&&selected.suggestedModels.length?<datalist id={`${id}-models`}>{selected.suggestedModels.map(item=><option key={item} value={item}/>)}</datalist>:null}
+    {agent?<p className="detail-note">Внешний агент Grok Bot. Поручения и сообщения уходят на общий вебхук; slug в событии указывает, какому агенту оно предназначено. Бота можно назначить ответственным и упомянуть в чате как @Имя.</p>
+      :<p className="detail-note">Используйте идентификатор модели, доступной в аккаунте выбранного провайдера. Для xAI · Grok текущая модель по умолчанию — {selected.id==="xai"?selected.defaultModel:"указанная в кабинете"}.</p>}
     <label htmlFor={`${id}-instructions`}>Инструкции боту<textarea id={`${id}-instructions`} name="systemPrompt" value={instructions} onChange={e=>setInstructions(e.target.value)} rows={5} maxLength={5000} placeholder="Какие задачи решает бот, каким должен быть ответ и что необходимо учитывать"/></label>
     <label className="check-label"><input type="checkbox" name="enabled" checked={enabled} onChange={e=>setEnabled(e.target.checked)}/>Включить бота</label>
-    <p className={`ai-connection ${!enabled?"disabled":selected.configured?"ready":"missing"}`} role="status">{!enabled?"Бот выключен.":selected.configured?"Ключ провайдера настроен. Доступ к модели можно проверить в помощнике подключения выше.":"Нужен ключ провайдера. Настройки бота можно сохранить, но запросы пока недоступны."}</p>
+    <p className={`ai-connection ${!enabled?"disabled":selected.configured?"ready":"missing"}`} role="status">{!enabled?"Бот выключен.":agent?(selected.configured?"Вебхук настроен. События будут уходить внешнему агенту.":"Вебхук не настроен."):selected.configured?"Ключ провайдера настроен. Доступ к модели можно проверить в помощнике подключения выше.":"Нужен ключ провайдера. Настройки бота можно сохранить, но запросы пока недоступны."}</p>
     {state.error?<p className="form-error" role="alert">{state.error} Введённые настройки остаются в форме.</p>:null}
     <SubmitButton disabled={pending}>{bot?"Сохранить настройки":"Создать бота"}</SubmitButton>
   </form>;
 }
 
+function providerBadge(provider:Settings["providers"][number]) {
+  if (provider.kind==="agent") return provider.configured?"Вебхук настроен":"Вебхук не настроен";
+  return provider.configured?"Ключ настроен":"Нужен ключ";
+}
+
+function botBadge(bot:Bot) {
+  if (!bot.enabled) return "Выключен";
+  if (!bot.configured) return bot.kind==="agent"?"Вебхук не настроен":"Нужен ключ";
+  if (bot.ready) return bot.kind==="agent"?"Вебхук настроен":"Ключ настроен";
+  return "Нужно настроить";
+}
+
 export function AiSettings({data}:{data:Settings}) {
   return <section className="ai-settings" aria-labelledby="ai-settings-title">
     <h2 id="ai-settings-title">AI-боты</h2>
-    <p>Настройте исполнителей для задач и обсуждений. При запуске содержание задачи или выбранного чата передаётся AI-провайдеру. Результат задачи ждёт проверки руководителя.</p>
-    <div className="ai-provider-status">{data.providers.map(provider=><div key={provider.id}><strong>{provider.label}</strong><span className={`ai-badge ${provider.configured?"ready":"missing"}`}>{provider.configured?"Ключ настроен":"Нужен ключ"}</span></div>)}</div>
+    <p>Настройте исполнителей для задач и обсуждений. Модельные боты xAI и OpenAI отвечают в приложении. Агенты Grok Bot получают поручения через вебхук и отвечают HTTP API.</p>
+    <div className="ai-provider-status">{data.providers.map(provider=><div key={provider.id}><strong>{provider.label}</strong><span className={`ai-badge ${provider.configured?"ready":"missing"}`}>{providerBadge(provider)}</span></div>)}</div>
     <ConnectionGuide providers={data.providers}/>
-    <div className="ai-bot-settings-list">{data.bots.map(bot=><details className="ai-bot-settings" key={bot.memberId}><summary><span><strong>{bot.name}</strong><small>{bot.model}</small></span><span className={`ai-badge ${!bot.enabled?"disabled":bot.ready?"ready":"missing"}`}>{!bot.enabled?"Выключен":!bot.configured?"Нужен ключ":bot.ready?"Ключ настроен":"Нужно настроить"}</span></summary>{bot.enabled&&!bot.ready&&bot.disabledReason?<p className="ai-connection missing">{bot.disabledReason}</p>:null}<BotForm bot={bot} providers={data.providers}/></details>)}</div>
-    <details className="ai-bot-settings ai-create"><summary>Создать AI-бота</summary><BotForm providers={data.providers}/></details>
+    <div className="ai-bot-settings-list">{data.bots.map(bot=><details className="ai-bot-settings" key={bot.memberId}><summary><span><strong>{bot.name}</strong><small>{bot.kind==="agent"?bot.slug||"агент":bot.model}</small></span><span className={`ai-badge ${!bot.enabled?"disabled":bot.ready?"ready":"missing"}`}>{botBadge(bot)}</span></summary>{bot.enabled&&!bot.ready&&bot.disabledReason?<p className="ai-connection missing">{bot.disabledReason}</p>:null}<BotForm bot={bot} providers={data.providers}/></details>)}</div>
+    <details className="ai-bot-settings ai-create"><summary>Создать бота</summary><BotForm providers={data.providers}/></details>
   </section>;
 }

@@ -3,7 +3,7 @@ import { useActionState, useState } from "react";
 import Link from "next/link";
 import { createTaskState, updateTaskState, deleteTask } from "@/app/actions";
 import type { ActionState } from "@/lib/ruli/action-state";
-import { BLOCK_SIZES, BLOCK_THEMES, ROOT_ID, taskHref, type Member, type TaskNode, type ViewMode } from "@/lib/ruli/model";
+import { BLOCK_SIZES, BLOCK_THEMES, PRIORITY_NAMES, ROOT_ID, taskHref, type Member, type TaskNode, type TaskPriority, type ViewMode } from "@/lib/ruli/model";
 import { Avatar } from "./ui";
 import { SubmitButton } from "./submit-button";
 import "./task-form.css";
@@ -14,6 +14,7 @@ export function TaskForm({kind,node,parentId=ROOT_ID,parentTitle,members,mode,pa
   const [title,setTitle]=useState(node?.title??"");
   const [owner,setOwner]=useState(node?.ownerId??members.find(m=>m.id==="me")?.id??members[0]?.id??"");
   const [due,setDue]=useState(node?.dueDate??"");
+  const [priority,setPriority]=useState<TaskPriority|"">(node?.priority??"");
   const [description,setDescription]=useState(node?.description??"");
   const [size,setSize]=useState(node?.size??"small");
   const [theme,setTheme]=useState(node?.theme??"teal");
@@ -56,14 +57,18 @@ export function TaskForm({kind,node,parentId=ROOT_ID,parentTitle,members,mode,pa
         <label>Название<input name="title" required maxLength={200} value={title} onChange={e=>setTitle(e.target.value)} placeholder={isGroup?"Какова общая цель?":"Какой результат нужен?"}/></label>
         <label>Описание<textarea name="description" rows={4} maxLength={2000} value={description} onChange={e=>setDescription(e.target.value)} placeholder={isGroup?"Общая цель и ожидаемые результаты подзадач":"Что нужно сделать и какой результат ожидается"}/></label>
         <div className="form-pair">
-          <label>Ответственный<select name="owner" value={owner} onChange={e=>setOwner(e.target.value)}>{members.map(m=><option key={m.id} value={m.id}>{m.name}{m.type==="bot"?" · AI":""}</option>)}</select></label>
+          <label>Ответственный<select name="owner" value={owner} onChange={e=>setOwner(e.target.value)}>{members.map(m=><option key={m.id} value={m.id}>{m.name}{m.type==="bot"?" · бот":""}</option>)}</select></label>
           <label>Срок <span className="task-field-hint">необязательно</span><input type="date" name="due" value={due} onChange={e=>setDue(e.target.value)}/></label>
         </div>
+        <label>Приоритет <span className="task-field-hint">необязательно</span><select name="priority" value={priority} onChange={e=>setPriority((e.target.value||"") as TaskPriority|"")}>
+          <option value="">Не указан</option>
+          {(Object.keys(PRIORITY_NAMES) as TaskPriority[]).map(id=><option key={id} value={id}>{PRIORITY_NAMES[id]}</option>)}
+        </select></label>
         <details className="task-form-extra">
           <summary>Участники <span>{additionalParticipants?`${additionalParticipants} дополнительно`:"Только ответственный"}</span></summary>
           <p>Ответственный участвует автоматически. Добавьте тех, кто помогает выполнить задачу.</p>
           <fieldset className="member-options"><legend className="sr-only">Участники {isGroup?"группы задач":"задачи"}</legend><div>{members.map(m=><label key={m.id} className="member-choice">
-            <input type="checkbox" name="participants" value={m.id} checked={m.id===owner||participants.includes(m.id)} disabled={m.id===owner} onChange={e=>setParticipants(p=>e.target.checked?[...p,m.id]:p.filter(id=>id!==m.id))}/><Avatar member={m}/><span>{m.name}{m.type==="bot"?<small>AI</small>:null}</span>
+            <input type="checkbox" name="participants" value={m.id} checked={m.id===owner||participants.includes(m.id)} disabled={m.id===owner} onChange={e=>setParticipants(p=>e.target.checked?[...p,m.id]:p.filter(id=>id!==m.id))}/><Avatar member={m}/><span>{m.name}{m.type==="bot"?<small>бот</small>:null}</span>
           </label>)}</div></fieldset>
         </details>
         <details className="task-form-extra">

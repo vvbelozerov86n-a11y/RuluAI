@@ -30,6 +30,7 @@ export const tasks = sqliteTable(
     dueLabel: text("due_label").notNull().default("Без срока"),
     dueDate: text("due_date"), // ISO yyyy-mm-dd, для сортировки и просрочек
     description: text("description").notNull().default(""),
+    priority: text("priority"), // high | medium | low — необязательный приоритет поручения
     result: text("result").notNull().default(""),
     size: text("size").notNull().default("small"), // small | wide | tall | large
     theme: text("theme").notNull().default("teal"), // teal | blue | cream | slate | graphite
@@ -105,11 +106,41 @@ export const botConfigs = sqliteTable("bot_configs", {
   provider: text("provider").notNull(),
   model: text("model").notNull(),
   systemPrompt: text("system_prompt").notNull().default(""),
+  slug: text("slug"), // уникальный идентификатор внешнего агента Grok Bot
   enabled: integer("enabled", {mode:"boolean"}).notNull().default(false),
   version: integer("version").notNull().default(1),
   updatedAt: text("updated_at").notNull(),
   lastMutationId: text("last_mutation_id"),
-});
+}, t => [uniqueIndex("bot_configs_slug_idx").on(t.slug)]);
+
+/** Исходящие события внешним агентам. Повтор использует тот же eventId. */
+export const botWebhookOutbox = sqliteTable("bot_webhook_outbox", {
+  id: text("id").primaryKey(),
+  event: text("event").notNull(),
+  taskId: text("task_id").notNull(),
+  botMemberId: text("bot_member_id").notNull(),
+  botSlug: text("bot_slug").notNull(),
+  payload: text("payload").notNull(),
+  status: text("status").notNull().default("pending"),
+  attempts: integer("attempts").notNull().default(0),
+  lastError: text("last_error"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, t => [
+  index("bot_webhook_outbox_task_idx").on(t.taskId, t.createdAt),
+  index("bot_webhook_outbox_status_idx").on(t.status, t.createdAt),
+]);
+
+/** Идемпотентность входящего Bot API: один ключ — один ответ на бота. */
+export const botApiIdempotency = sqliteTable("bot_api_idempotency", {
+  botMemberId: text("bot_member_id").notNull(),
+  idempotencyKey: text("idempotency_key").notNull(),
+  method: text("method").notNull(),
+  path: text("path").notNull(),
+  status: integer("status").notNull(),
+  body: text("body").notNull(),
+  createdAt: text("created_at").notNull(),
+}, t => [uniqueIndex("bot_api_idempotency_pk").on(t.botMemberId, t.idempotencyKey)]);
 
 /** A logical request is deduplicated across retries. Leases fence old workers. */
 export const aiRuns = sqliteTable("ai_runs", {

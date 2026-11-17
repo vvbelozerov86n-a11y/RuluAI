@@ -63,7 +63,7 @@ function harness() {
     const rows = sqlite.prepare("SELECT * FROM tasks WHERE deleted_at IS NULL").all();
     const byId = new Map(rows.map(row => [row.id, {
       id: row.id, parentId: row.parent_id, title: row.title, ownerId: row.owner_id,
-      kind: row.kind, status: row.status, description: row.description, result: row.result,
+      kind: row.kind, status: row.status, priority: row.priority ?? null, description: row.description, result: row.result,
       dueDate: row.due_date, dueLabel: row.due_label, size: row.size, theme: row.theme,
       position: row.position, version: row.version, splitSourceId: row.split_source_id,
       children: [], participants: sqlite.prepare("SELECT member_id FROM task_participants WHERE task_id=?").all(row.id).map(x => x.member_id),
@@ -81,6 +81,7 @@ function harness() {
     "../lib/ruli/model": model,
     "../lib/ruli/mutations": mutations,
     "../lib/ruli/task-schedule": taskSchedule,
+    "../lib/ruli/agent-runtime": { notifyTaskChangeForAgents: async () => {}, retryAgentDelivery: async () => null, listTaskDeliveries: async () => [], agentWebhookConfigured: () => false },
   };
   const exports = {};
   vm.runInNewContext(source, { exports, require(name) { if (!(name in modules)) throw new Error(`Unexpected import ${name}`); return modules[name]; }, FormData, URLSearchParams, crypto, console: { error() {} } });
@@ -342,6 +343,7 @@ function integratedHarness(t) {
     "../lib/ruli/model": model,
     "../lib/ruli/mutations": mutations,
     "../lib/ruli/task-schedule": taskSchedule,
+    "../lib/ruli/agent-runtime": { notifyTaskChangeForAgents: async () => {}, retryAgentDelivery: async () => null, listTaskDeliveries: async () => [], agentWebhookConfigured: () => false },
   };
   const exports = {};
   vm.runInNewContext(source,{exports,require:name=>modules[name],FormData,URLSearchParams,crypto,console});

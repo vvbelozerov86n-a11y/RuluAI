@@ -12,6 +12,7 @@ import * as model from "../lib/ruli/model.ts";
 import * as scheduling from "../lib/ruli/scheduling.ts";
 import * as policy from "../lib/ruli/policy.ts";
 import * as returnPath from "../lib/ruli/return-path.ts";
+import * as botCatalog from "../lib/ruli/bot-catalog.ts";
 
 const project = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -25,7 +26,9 @@ export function loadModule(relative, bindings, exports) {
     .replace(/^export\s*\{[^}]*\}\s*from\s*["'][^"']+["'];?\s*/gm, "")
     .replace(/^export /gm, "");
   const context = vm.createContext({
-    console, FormData, URLSearchParams, crypto: webcrypto, Error, RangeError,
+    console, FormData, URLSearchParams, URL, Headers, Request, Response, fetch,
+    TextEncoder, TextDecoder, AbortController, Blob, setTimeout, clearTimeout,
+    crypto: webcrypto, Error, RangeError,
     redirect: (url) => { throw new TestRedirect(url); },
     ...bindings,
   });
@@ -137,7 +140,7 @@ export function collaborationHarness() {
     const rows = sqlite.prepare("SELECT * FROM tasks WHERE deleted_at IS NULL").all();
     const nodes = new Map(rows.map((row) => [row.id, {
       id: row.id, parentId: row.parent_id, kind: row.kind, title: row.title, ownerId: row.owner_id,
-      status: row.status, dueDate: row.due_date, dueLabel: row.due_label, description: row.description,
+      status: row.status, priority: row.priority ?? null, dueDate: row.due_date, dueLabel: row.due_label, description: row.description,
       result: row.result, size: row.size, theme: row.theme, position: row.position, version: row.version,
       deletedAt: row.deleted_at, splitSourceId: row.split_source_id, children: [], participants: [],
     }]));
@@ -145,7 +148,7 @@ export function collaborationHarness() {
     for (const node of nodes.values()) if (node.parentId) nodes.get(node.parentId)?.children.push(node);
     return nodes.get("root");
   }
-  const common = { ...model, ...policy, ...access, ...returnPath, getD1: () => db, getMembers, loadTree };
+  const common = { ...model, ...policy, ...access, ...returnPath, ...botCatalog, getD1: () => db, getMembers, loadTree, notifyMessageForAgents: async () => {}, notifyTaskChangeForAgents: async () => {}, retryAgentDelivery: async () => null };
   const collaboration = loadModule("lib/ruli/collaboration.ts", common, ["taskChannelMembers", "scheduleSelect", "workloadSelect", "loadTaskCollaboration"]);
   const actions = loadModule("app/collaboration-actions.ts", { ...common, ...collaboration, ...scheduling }, ["sendMessageState", "sendMessage", "generateTaskSchedule", "updateScheduleEntry", "clearTaskSchedule"]);
   const teamActions = loadModule("app/team-actions.ts", common, ["addTeamMember"]);

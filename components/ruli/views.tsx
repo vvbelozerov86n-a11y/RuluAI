@@ -9,7 +9,9 @@ import {SubmitButton} from "./submit-button";
 import {TaskCollaboration} from "./collaboration";
 import {TaskAiPanel} from "./ai-task";
 import {loadTaskAi} from "@/lib/ruli/ai";
-import {BLOCK_SIZES,ROOT_ID,STATUS_NAMES,isOverdue,peopleOf,plural,progress,stats,taskHref,type Member,type TaskNode,type ViewMode} from "@/lib/ruli/model";
+import {BotDeliveryStatus} from "./bot-delivery";
+import type {OutboxRow} from "@/lib/ruli/agent-webhook";
+import {BLOCK_SIZES,PRIORITY_NAMES,ROOT_ID,STATUS_NAMES,isOverdue,peopleOf,plural,progress,stats,taskHref,type Member,type TaskNode,type ViewMode} from "@/lib/ruli/model";
 import {dueTodaySource,hasTaskFilters,normalizeTaskFilters,overdueSource,searchTasks,taskAttentionSummary,type TaskEntry,type TaskFilters} from "@/lib/ruli/task-search";
 import "./overview.css";
 export {taskHref}; export type {ViewMode};
@@ -94,7 +96,7 @@ function TaskSearch({tree,members,filters,today,layout}:{tree:TaskNode;members:M
   </section>;
 }
 
-type ViewProps={node:TaskNode;path:TaskNode[];mode:ViewMode;members:Member[];today:string;viewer:AccessContext;flash?:string;error?:string;channel?:string;filters?:TaskFilters;layout?:OverviewLayout};
+type ViewProps={node:TaskNode;path:TaskNode[];mode:ViewMode;members:Member[];today:string;viewer:AccessContext;flash?:string;error?:string;channel?:string;filters?:TaskFilters;layout?:OverviewLayout;deliveries?:OutboxRow[]};
 export function GroupView({node,path,mode,members,today,viewer,flash,error,channel,filters:rawFilters={},layout="list"}:ViewProps) {
   const filters=normalizeTaskFilters(rawFilters),isRoot=node.id===ROOT_ID,s=stats(node,today),owner=members.find(m=>m.id===node.ownerId),manager=canManage(viewer),filtered=isRoot&&hasTaskFilters(filters),cards=layout==="cards"||mode==="build",children=node.children.filter(child=>!child.deletedAt);
   const canUnnest=node.kind==="group"&&node.children.length===1&&node.children[0].kind==="leaf"&&node.children[0].splitSourceId===node.id;
@@ -114,7 +116,7 @@ export function GroupView({node,path,mode,members,today,viewer,flash,error,chann
   </main>;
 }
 
-export async function DetailView({node,path,mode,members,today,viewer,flash,error,channel}:ViewProps) {
+export async function DetailView({node,path,mode,members,today,viewer,flash,error,channel,deliveries=[]}:ViewProps) {
   const owner=members.find(m=>m.id===node.ownerId),parent=path.at(-2)!,status=node.status??"todo",manager=canManage(viewer),people=branchPeople(node,members);
   const canSubmit=manager||(viewer.role==="executor"&&(node.ownerId===viewer.memberId||node.participants.includes(viewer.memberId)));
   return <main className={`workspace${mode==="build"?" is-building":""}`}>
@@ -124,10 +126,11 @@ export async function DetailView({node,path,mode,members,today,viewer,flash,erro
     <div className="leaf-constructor-bar"><ParticipantCounters human={people.counts.human.length} bot={people.counts.bot.length} title={node.title} people={people.list}/><span>Участники задачи</span>{manager?<div><Link className="secondary" href={`/t/${node.id}/edit?mode=${mode}`}>Изменить задачу</Link><form className="inline" action={nestTask}><MutationFields node={node} mode={mode}/><SubmitButton className="secondary">Разбить на подзадачи</SubmitButton></form></div>:null}</div>
     <div className="detail-layout"><article className="detail-card" id="task-details"><h2>Что нужно сделать</h2><p className="prewrap">{node.description||"Описание пока не заполнено."}</p>
       {owner?.type==="bot"?<TaskAiPanel taskId={node.id} version={node.version} data={await loadTaskAi(node,viewer)} manager={manager} clientId={crypto.randomUUID()}/>:null}
+      <BotDeliveryStatus rows={deliveries} manager={manager} taskId={node.id} version={node.version} mode={mode}/>
       <div className="section-divider"/><div className="result-label"><h2>Результат</h2><span>{status==="review"?"Ожидает решения руководителя":status==="done"?"Проверено":"Появится после выполнения"}</span></div>
       {node.result?<div className="result-content">{node.result}</div>:<div className="result-empty">Результат ещё не добавлен.</div>}
       {status==="review"&&manager?<div className="detail-actions">{([{value:"done",label:"Принять результат"},{value:"doing",label:"На доработку"}] as const).map(action=><form className="inline" action={setStatus} key={action.value}><MutationFields node={node} mode={mode}/><input type="hidden" name="status" value={action.value}/><SubmitButton className={action.value==="done"?"primary":"secondary"}>{action.label}</SubmitButton></form>)}</div>:status==="done"?<div className="detail-actions"><StateChip className="done" label="Результат принят"/>{manager?<form action={setStatus}><MutationFields node={node} mode={mode}/><input type="hidden" name="status" value="doing"/><SubmitButton className="secondary">Вернуть в работу</SubmitButton></form>:null}</div>:canSubmit&&status!=="review"?<ResultForm node={node} mode={mode}/>:null}
-    </article><aside className="detail-side"><div className="property"><span className="property-label">ОТВЕТСТВЕННЫЙ</span>{owner?<OwnerChip member={owner} full/>:null}<p className="detail-note">{owner?.role}</p></div><div className="property"><span className="property-label">СРОК</span><span className="property-value">{node.dueLabel}</span>{isOverdue(node,today)?<StateChip className="overdue" label="Срок прошёл"/>:null}</div><div className="property"><span className="property-label">ГРУППА</span><Link href={taskHref(parent.id,mode)}>{parent.title} ↗</Link></div><div className="property"><span className="property-label">ПРОВЕРЯЕТ</span><span>Руководитель команды</span></div></aside></div>
+    </article><aside className="detail-side"><div className="property"><span className="property-label">ОТВЕТСТВЕННЫЙ</span>{owner?<OwnerChip member={owner} full/>:null}<p className="detail-note">{owner?.role}</p></div><div className="property"><span className="property-label">СРОК</span><span className="property-value">{node.dueLabel}</span>{isOverdue(node,today)?<StateChip className="overdue" label="Срок прошёл"/>:null}</div>{node.priority?<div className="property"><span className="property-label">ПРИОРИТЕТ</span><span className="property-value">{PRIORITY_NAMES[node.priority]}</span></div>:null}<div className="property"><span className="property-label">ГРУППА</span><Link href={taskHref(parent.id,mode)}>{parent.title} ↗</Link></div><div className="property"><span className="property-label">ПРОВЕРЯЕТ</span><span>Руководитель команды</span></div></aside></div>
     <TaskCollaboration node={node} members={members} viewer={viewer} channel={channel} mode={mode}/>
     <WorkspaceFooter hint="Путь сверху вернёт вас на любой уровень"/>
   </main>;

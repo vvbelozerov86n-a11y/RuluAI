@@ -30,6 +30,7 @@ export async function saveBotState(_previous: ActionState, form: FormData): Prom
       memberId: value(form, "memberId").trim() || undefined,
       version: Number(value(form, "version")), name: value(form, "name"), role: value(form, "role"),
       provider: value(form, "provider"), model: value(form, "model"), systemPrompt: value(form, "systemPrompt"),
+      slug: value(form, "slug"),
       enabled: form.has("enabled") && !["false", "0", ""].includes(value(form, "enabled")),
     });
   } catch (error) { return failure(form, error); }

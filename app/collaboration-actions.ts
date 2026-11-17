@@ -9,6 +9,7 @@ import { taskChannelMembers, scheduleSelect, workloadSelect, type ScheduleRow, t
 import { generateSchedule, scheduleCapacityOnDate, validateScheduleOptions, validateScheduleRange } from "../lib/ruli/scheduling";
 import type { ActionState } from "../lib/ruli/action-state";
 import { validateAiReply, requestAiReply, aiErrorMessage } from "../lib/ruli/ai";
+import { notifyMessageForAgents } from "../lib/ruli/agent-runtime";
 
 function value(form:FormData,key:string) { return String(form.get(key)??"").trim(); }
 function destination(id:string,channel:string|null=null):string {
@@ -39,15 +40,25 @@ async function postMessage(form:FormData):Promise<ActionState|undefined> {
   if (previous) {
     return previous.task_id===taskId && previous.channel_member_id===channel && previous.body===body ? undefined : failure(form,"Это сообщение уже было отправлено. Обновите диалог для нового сообщения.");
   }
+  const messageId=crypto.randomUUID();
   const result=await db.prepare(`INSERT INTO task_messages
     (id,task_id,channel_member_id,author_id,author_user_id,author_name,body,client_id,created_at)
     SELECT ?,id,?,?,?,?,?,?,? FROM tasks WHERE id=? AND deleted_at IS NULL
     ON CONFLICT(author_user_id,client_id) DO NOTHING`).bind(
-      crypto.randomUUID(),channel,viewer.memberId,viewer.userId,viewer.displayName,body,clientId,new Date().toISOString(),taskId).run();
+      messageId,channel,viewer.memberId,viewer.userId,viewer.displayName,body,clientId,new Date().toISOString(),taskId).run();
   if (!result.meta.changes) {
     const retry=await db.prepare("SELECT id FROM task_messages WHERE author_user_id=? AND client_id=? AND task_id=? AND channel_member_id IS ? AND body=?")
       .bind(viewer.userId,clientId,taskId,channel,body).first();
     if (!retry) return failure(form,"Задача изменилась. Обновите страницу; текст сохранён в форме.");
+  } else {
+    await notifyMessageForAgents(db, {
+      id:node.id,title:node.title,description:node.description,status:node.status,
+      priority:node.priority??null,due:node.dueDate,parentId:node.parentId,
+      ownerId:node.ownerId,participants:node.participants,
+    }, {
+      id:messageId,authorId:viewer.memberId,authorName:viewer.displayName,
+      authorKind:"human",text:body,channelMemberId:channel,
+    });
   }
 }
 export async function sendMessageState(_previous:ActionState,form:FormData):Promise<ActionState> {
@@ -58,14 +69,15 @@ export async function sendMessageState(_previous:ActionState,form:FormData):Prom
   const channelBot=channel ? members.find(member=>member.id===channel&&member.type==="bot") : undefined;
   const botMemberId=channelBot?.id||value(form,"botMemberId");
   const aiInput={taskId:value(form,"taskId"),channelMemberId:channel,botMemberId,clientId:value(form,"clientId")};
-  if(botMemberId) {
+  const external=botMemberId ? (await getD1().prepare("SELECT provider FROM bot_configs WHERE member_id=?").bind(botMemberId).first<{provider:string}>())?.provider==="grok-bot" : false;
+  if(botMemberId && !external) {
     try { await validateAiReply(aiInput); }
     catch(error) { return failure(form,aiErrorMessage(error)); }
   }
   const error=await postMessage(form);
   if (error) return error;
   const acknowledged:ActionState={sentClientId:value(form,"clientId")};
-  if(!botMemberId)return acknowledged;
+  if(!botMemberId||external)return acknowledged;
   try {
     const run=await requestAiReply(aiInput);
     return {...acknowledged,aiRunId:run.id,aiStatus:run.status,notice:run.error||
