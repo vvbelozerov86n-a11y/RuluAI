@@ -83,6 +83,24 @@ test("message validation rejects excessive length and malformed retry tokens wit
   assert.equal(h.one("SELECT COUNT(*) AS count FROM task_messages").count, 0);
 });
 
+test("message state acknowledges the exact client token without redirect and retries stay idempotent", async (t) => {
+  const h = fixture(t);
+  h.as("anna");
+  const values = message({ channelMemberId: "anna", clientId: "ack-private-001" });
+  const sent = await h.invoke("sendMessageState", values, true);
+  assert.equal(sent.redirect, undefined);
+  assert.deepEqual(plain(sent.state), { sentClientId: values.clientId });
+  const retried = await h.invoke("sendMessageState", values, true);
+  assert.deepEqual(plain(retried.state), { sentClientId: values.clientId });
+  assert.equal(h.one("SELECT COUNT(*) AS count FROM task_messages").count, 1);
+  const changed = await h.invoke("sendMessageState", { ...values, body: "Новый черновик" }, true);
+  assert.equal(changed.state.sentClientId, undefined);
+  assert.equal(changed.state.values.body, "Новый черновик");
+  assert.ok(changed.state.error);
+  const ordinary = await h.invoke("sendMessage", message({ clientId: "ordinary-send-001" }));
+  assert.equal(redirectMessage(ordinary, "flash"), "Сообщение отправлено");
+});
+
 test("generate and update schedule actions deny non-managers before writes", async (t) => {
   const h = fixture(t);
   for (const identity of ["anna", "max", "viewer"]) {
@@ -154,6 +172,53 @@ test("manual updates reject other-plan workload conflicts, weekends and invalid 
   assert.match(redirectMessage(await h.invoke("updateScheduleEntry", editEntry(entry, { startDate: "2026-02-31", endDate: "2026-02-31" }))), /существующие даты/);
   assert.deepEqual(h.one("SELECT * FROM schedule_entries WHERE id=?", entry.id), entry);
   assert.equal(h.one("SELECT version FROM tasks WHERE id='root'").version, version);
+});
+
+test("manual moves preserve the edit and explicitly name missed leaf and ancestor deadlines", async (t) => {
+  const h = fixture(t);
+  h.sqlite.prepare("UPDATE tasks SET due_date=? WHERE id IN ('root','launch','letter')").run("2027-01-05");
+  await h.invoke("generateTaskSchedule", plan({ startDate: "2027-01-05", hoursPerDay: 4 }));
+  const entry = h.one("SELECT * FROM schedule_entries WHERE task_id='letter'");
+  const moved = await h.invoke("updateScheduleEntry", editEntry(entry, { startDate: "2027-01-08", endDate: "2027-01-08" }));
+  assert.equal(redirectMessage(moved), null);
+  const notice = redirectMessage(moved, "flash");
+  assert.match(notice, /Предупреждение: нарушены сроки/);
+  for (const title of ["root", "launch", "letter"]) {
+    assert.ok(notice.includes(`«${title}»: срок 2027-01-05, окончание этапа 2027-01-08`));
+  }
+  assert.equal(h.one("SELECT end_date FROM schedule_entries WHERE id=?", entry.id).end_date, "2027-01-08");
+});
+
+test("completed future work stays in display history while generation and manual edits release its capacity", async (t) => {
+  const h = fixture(t);
+  await h.invoke("generateTaskSchedule", plan({ taskId: "service", startDate: "2027-01-05", hoursPerDay: 4 }));
+  h.sqlite.prepare("UPDATE tasks SET status='done',result='Принято' WHERE id='help'").run();
+  assert.equal(redirectMessage(await h.invoke("generateTaskSchedule", plan({ startDate: "2027-01-05", hoursPerDay: 4, estimatedHoursPerTask: 8 }))), null);
+  const letter = h.one("SELECT * FROM schedule_entries WHERE task_id='letter' ORDER BY start_date LIMIT 1");
+  assert.equal(letter.start_date, "2027-01-05");
+  assert.equal(redirectMessage(await h.invoke("updateScheduleEntry", editEntry(letter))), null);
+  const history = h.one("SELECT * FROM schedule_entries WHERE task_id='help'");
+  const edited = await h.invoke("updateScheduleEntry", editEntry(history, { startDate: "2027-01-06", endDate: "2027-01-06" }));
+  assert.equal(redirectMessage(edited), null, "historical done entry must not compete with the active letter on January 6");
+  const service = (await h.loadTree()).children.find(node => node.id === "service");
+  const displayed = await h.collaboration.loadTaskCollaboration(service, await h.access.requireAccess());
+  assert.equal(displayed.entries.length, 1);
+  assert.equal(displayed.entries[0].taskId, "help");
+  assert.equal(displayed.entries[0].endDate, "2027-01-06");
+  assert.equal(h.all(h.collaboration.workloadSelect).some(entry => entry.taskId === "help"), false);
+});
+
+test("higher-capacity generation and manual edits cannot override a stricter overlapping plan", async (t) => {
+  const h = fixture(t);
+  await h.invoke("generateTaskSchedule", plan({ taskId: "service", startDate: "2027-01-05", hoursPerDay: 4, estimatedHoursPerTask: 2 }));
+  await h.invoke("generateTaskSchedule", plan({ startDate: "2027-01-05", hoursPerDay: 8, estimatedHoursPerTask: 4 }));
+  assert.deepEqual(h.all("SELECT start_date,hours FROM schedule_entries WHERE task_id='letter' ORDER BY start_date"), [
+    { start_date: "2027-01-05", hours: 2 }, { start_date: "2027-01-06", hours: 2 },
+  ]);
+  const entry = h.one("SELECT * FROM schedule_entries WHERE task_id='letter' ORDER BY start_date LIMIT 1");
+  const refused = await h.invoke("updateScheduleEntry", editEntry(entry, { hours: 3 }));
+  assert.match(redirectMessage(refused), /превышена дневная загрузка.*4 ч/);
+  assert.equal(h.one("SELECT hours FROM schedule_entries WHERE id=?", entry.id).hours, 2);
 });
 
 test("requireAccess rejects uninvited identities, binds invitations once and ignores caller role claims", async (t) => {

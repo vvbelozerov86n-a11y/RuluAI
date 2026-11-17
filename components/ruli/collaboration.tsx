@@ -32,13 +32,13 @@ export async function TaskCollaboration({node,members,viewer,channel,mode="view"
       <div className="panel-heading"><div><h2 id="discussion-title">Обсуждение</h2><p>Вопросы, решения и договорённости по этой задаче.</p></div></div>
       {unavailable?<p className="page-notice error" role="alert">Этот личный диалог недоступен. Открыт общий чат задачи.</p>:null}
       <nav className="chat-channels" aria-label="Каналы обсуждения">
-        <Link href={chatHref()} aria-current={!selected?"page":undefined}>Общий чат</Link>
-        {data.channels.map(member=><Link key={member.id} href={chatHref(member.id)} aria-current={selected===member.id?"page":undefined}>{member.name}<small>Личный диалог</small></Link>)}
+        <a href={chatHref()} aria-current={!selected?"page":undefined}>Общий чат</a>
+        {data.channels.map(member=><a key={member.id} href={chatHref(member.id)} aria-current={selected===member.id?"page":undefined}>{member.name}<small>Личный диалог</small></a>)}
       </nav>
       <p className="channel-note">{selectedMember?`Личный диалог: руководитель и ${selectedMember.name}. Остальные участники его не видят.`:"Общий чат видят участники команды, имеющие доступ к задаче."}</p>
       {selectedMember?.type==="bot"?<p className="channel-note">AI-бот пока не подключён. Сообщения сохраняются; автоматических ответов сейчас нет.</p>:null}
-      <MessageFeed key={`feed:${messageClientId}`} taskId={node.id} channelMemberId={selected} viewerMemberId={viewer.memberId} initialMessages={data.messages}/>
-      {viewer.role!=="viewer"?<MessageComposer key={`composer:${messageClientId}`} taskId={node.id} channelMemberId={selected} clientId={messageClientId} mode={mode}/>:<p className="detail-note">У вас доступ для просмотра обсуждения.</p>}
+      <MessageFeed key={`feed:${viewer.userId}:${node.id}:${selected??"general"}`} taskId={node.id} channelMemberId={selected} viewerMemberId={viewer.memberId} initialMessages={data.messages}/>
+      {viewer.role!=="viewer"?<MessageComposer key={`composer:${viewer.userId}:${node.id}:${selected??"general"}`} taskId={node.id} channelMemberId={selected} viewerUserId={viewer.userId} clientId={messageClientId} mode={mode}/>:<p className="detail-note">У вас доступ для просмотра обсуждения.</p>}
       <a className="refresh-link" href={chatHref(selected)}>Обновить сообщения</a>
     </section>
     <section className="collaboration-panel" id="schedule" aria-labelledby="schedule-title">

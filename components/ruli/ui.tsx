@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Icon, PersonIcon, BotIcon } from "./icons";
 import type { Member, TaskStatus } from "@/lib/ruli/model";
 import { STATUS_NAMES } from "@/lib/ruli/model";
+import { ParticipantPopover } from "./participant-popover";
 export function Avatar({member,className=""}:{member:Member;className?:string}) {
   return <span className={`avatar ${member.color} ${className}`.trim()} aria-hidden="true">{member.initials}</span>;
 }
@@ -13,18 +14,14 @@ export function TaskStatusChip({status}:{status:TaskStatus}) {return <StateChip 
 export function ParticipantCounters({human,bot,title,people=[]}:{human:number;bot:number;title:string;people?:Member[]}) {
   return <div className="participant-counters">{(["human","bot"] as const).map(type=>{
     const count=type==="human"?human:bot;
-    return <details className="participant-picker" key={type}>
-      <summary className={`participant-square ${type} ${count?"lit":"unlit"}`} aria-label={`${type==="human"?"Люди":"Боты"}: ${count}. ${title}`}>
-        <span>{type==="human"?<PersonIcon/>:<BotIcon/>}</span><strong>{count}</strong>
-      </summary>
-      <div className="participant-popover">
+    return <ParticipantPopover key={type} className={`participant-square ${type} ${count?"lit":"unlit"}`} label={`${type==="human"?"Люди":"Боты"}: ${count}. ${title}`}
+      summary={<><span>{type==="human"?<PersonIcon/>:<BotIcon/>}</span><strong>{count}</strong></>}>
         <strong>{type==="human"?"Люди":"AI-боты"} в задаче</strong>
         {people.filter(m=>m.type===type).map(member=><div className="member-row" key={member.id}><Avatar member={member}/><span>{member.name}<small>{member.role}</small></span></div>)}
         {!count?<p>Пока не назначены.</p>:null}
         <p className="detail-note">Участники этой задачи и всех подзадач.</p>
         <Link href="/team">Вся команда →</Link>
-      </div>
-    </details>;
+    </ParticipantPopover>;
   })}</div>;
 }
 export function ProgressBar({percent,label}:{percent:number;label:string}) {

@@ -3,9 +3,9 @@ import { redirect } from "next/navigation";
 import { getD1 } from "../db";
 import { requireAccess, canManage, canWriteChannel } from "../lib/ruli/access";
 import { loadTree, getMembers } from "../lib/ruli/data";
-import { findPath } from "../lib/ruli/model";
-import { taskChannelMembers, scheduleSelect, type ScheduleRow } from "../lib/ruli/collaboration";
-import { generateSchedule, validateScheduleOptions, validateScheduleRange } from "../lib/ruli/scheduling";
+import { findPath, isISODate } from "../lib/ruli/model";
+import { taskChannelMembers, scheduleSelect, workloadSelect, type ScheduleRow, type ScheduleWorkloadRow } from "../lib/ruli/collaboration";
+import { generateSchedule, scheduleCapacityOnDate, validateScheduleOptions, validateScheduleRange } from "../lib/ruli/scheduling";
 import type { ActionState } from "../lib/ruli/action-state";
 
 function value(form:FormData,key:string) { return String(form.get(key)??"").trim(); }
@@ -51,7 +51,7 @@ async function postMessage(form:FormData):Promise<ActionState|undefined> {
 export async function sendMessageState(_previous:ActionState,form:FormData):Promise<ActionState> {
   const error=await postMessage(form);
   if (error) return error;
-  finish(value(form,"taskId"),"Сообщение отправлено",false,value(form,"channelMemberId")||null);
+  return {sentClientId:value(form,"clientId")};
 }
 export async function sendMessage(form:FormData):Promise<void> {
   const error=await postMessage(form);
@@ -71,7 +71,7 @@ export async function generateTaskSchedule(form:FormData):Promise<void> {
   const invalid=validateScheduleOptions(options);
   if (invalid) finish(id,invalid,true);
   const db=getD1();
-  const existing=await db.prepare(`${scheduleSelect} AND s.plan_task_id<>?`).bind(id).all<ScheduleRow>();
+  const existing=await db.prepare(`${workloadSelect} AND s.plan_task_id<>?`).bind(id).all<ScheduleWorkloadRow>();
   const current=await db.prepare("SELECT id FROM schedule_entries WHERE plan_task_id=? LIMIT 1").bind(id).first();
   if (current && !form.has("replaceConfirmed")) finish(id,"Подтвердите замену текущего графика и ручных правок.",true);
   let plan:ReturnType<typeof generateSchedule>;
@@ -121,13 +121,15 @@ export async function updateScheduleEntry(form:FormData):Promise<void> {
   if (invalid) finish(taskId,invalid,true);
   const entry=await db.prepare(`${scheduleSelect} AND s.id=? AND s.plan_task_id=?`).bind(id,taskId).first<ScheduleRow>();
   if (!entry) finish(taskId,"Этап уже изменён или удалён",true);
-  const all=await db.prepare(`${scheduleSelect} AND s.member_id=? AND s.id<>?`).bind(entry.memberId,id).all<ScheduleRow>();
+  const path=findPath(entry.taskId,tree);
+  const active=path?.at(-1)?.kind==="leaf" && path.at(-1)?.status!=="done";
+  const all=active ? await db.prepare(`${workloadSelect} AND s.member_id=? AND s.id<>?`).bind(entry.memberId,id).all<ScheduleWorkloadRow>() : {results:[] as ScheduleWorkloadRow[]};
   const dayMs=86400000, count=(Date.parse(end)-Date.parse(start))/dayMs+1;
   for (let d=Date.parse(start);d<=Date.parse(end);d+=dayMs) {
     const date=new Date(d), iso=date.toISOString().slice(0,10);
     if (settings.weekdaysOnly && [0,6].includes(date.getUTCDay())) finish(taskId,"В этом графике выходные исключены. Выберите рабочий день или пересоздайте график.",true);
-    const load=all.results.filter(e=>e.startDate<=iso&&e.endDate>=iso).reduce((sum,e)=>sum+e.hours/((Date.parse(e.endDate)-Date.parse(e.startDate))/dayMs+1),0);
-    if (load+hours/count>settings.hoursPerDay+1e-7) finish(taskId,`На ${iso} превышена дневная загрузка исполнителя (${settings.hoursPerDay} ч).`,true);
+    const capacity=scheduleCapacityOnDate(all.results,entry.memberId,iso,settings.hoursPerDay);
+    if (active && capacity.hours+hours/count>capacity.limit+1e-7) finish(taskId,`На ${iso} превышена дневная загрузка исполнителя (${capacity.limit} ч).`,true);
   }
   const token=crypto.randomUUID();
   const guard="EXISTS (SELECT 1 FROM tasks WHERE id='root' AND last_mutation_id=?)";
@@ -139,7 +141,9 @@ export async function updateScheduleEntry(form:FormData):Promise<void> {
     db.prepare(`UPDATE schedule_plans SET version=version+1,last_mutation_id=? WHERE task_id=? AND ${guard}`).bind(token,taskId,token),
   ]);
   if (!result[0].meta.changes) finish(taskId,"График изменён в другой вкладке. Обновите страницу.",true);
-  finish(taskId,"Этап графика обновлён");
+  const deadlines=(path??[]).filter(task=>task.dueDate && isISODate(task.dueDate) && end>task.dueDate);
+  const warning=deadlines.map(task=>`«${task.title}»: срок ${task.dueDate}, окончание этапа ${end}.`).join(" ");
+  finish(taskId,`Этап графика обновлён.${warning?` Предупреждение: нарушены сроки. ${warning}`:""}`);
 }
 
 export async function clearTaskSchedule(form:FormData):Promise<void> {

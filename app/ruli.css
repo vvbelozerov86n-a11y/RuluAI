@@ -178,3 +178,5 @@ form.inline { display: contents; }
 .schedule-clear{margin:18px 0;padding:16px;border:1px solid #85645d;border-radius:8px;background:#322c2d}.schedule-clear>summary{color:#edc1b5;font-size:12px;cursor:pointer}.schedule-clear p{font-size:12px;line-height:1.6;color:#dfc8c1}.schedule-clear .danger-button{margin-top:8px}
 .task-jumps{display:flex;gap:18px;flex-wrap:wrap;margin:-7px 0 25px}.task-jumps a{font-size:12px;color:#b9dec9;text-decoration:underline;text-underline-offset:4px}.task-jumps a:hover{color:#e4f6eb}
 .feed-status{font-size:11px;line-height:1.6;color:#9fc1b4;margin:14px 0 0}.feed-status.offline{color:#f0ccab}.message-feed .message-list{overflow-anchor:none}
+/* Position is measured against the viewport, including the rightmost card. */
+.participant-popover{max-width:none;overflow:auto;overscroll-behavior:contain}.participant-picker summary:focus-visible{outline:2px solid #b9ddc8;outline-offset:4px}.participant-picker:has(.participant-popover:focus-within){z-index:35}

@@ -145,7 +145,7 @@ export function collaborationHarness() {
     return nodes.get("root");
   }
   const common = { ...model, ...policy, ...access, getD1: () => db, getMembers, loadTree };
-  const collaboration = loadModule("lib/ruli/collaboration.ts", common, ["taskChannelMembers", "scheduleSelect", "loadTaskCollaboration"]);
+  const collaboration = loadModule("lib/ruli/collaboration.ts", common, ["taskChannelMembers", "scheduleSelect", "workloadSelect", "loadTaskCollaboration"]);
   const actions = loadModule("app/collaboration-actions.ts", { ...common, ...collaboration, ...scheduling }, ["sendMessageState", "sendMessage", "generateTaskSchedule", "updateScheduleEntry", "clearTaskSchedule"]);
   const teamActions = loadModule("app/team-actions.ts", common, ["addTeamMember"]);
   async function invoke(name, values, state = false) {

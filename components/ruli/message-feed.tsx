@@ -1,6 +1,6 @@
 "use client";
 
-import {useEffect, useLayoutEffect, useRef, useState} from "react";
+import {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from "react";
 import type {ChatMessage} from "@/lib/ruli/collaboration";
 
 type ReadingPosition = {
@@ -40,12 +40,30 @@ export function MessageFeed({
   viewerMemberId: string;
   initialMessages: ChatMessage[];
 }) {
-  const [messages, setMessages] = useState(() => initialMessages.slice(-100));
+  const [polledMessages, setPolledMessages] = useState<ChatMessage[]>([]);
+  const messages = useMemo(() => {
+    // Messages are append-only. A fresh server snapshot and polling may arrive in either order.
+    const byId = new Map([...initialMessages, ...polledMessages].map(message => [message.id, message]));
+    return [...byId.values()].sort((a,b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)).slice(-100);
+  }, [initialMessages, polledMessages]);
   const [networkError, setNetworkError] = useState("");
   const listRef = useRef<HTMLOListElement>(null);
   const messagesRef = useRef(messages);
   const readingRef = useRef<ReadingPosition | null>(null);
   const firstPaintRef = useRef(true);
+  const rememberPosition = useCallback(() => {
+    const list = listRef.current;
+    if (!list) return;
+    const bounds = list.getBoundingClientRect();
+    const anchor = Array.from(list.children).find(item => item.getBoundingClientRect().bottom > bounds.top);
+    readingRef.current = {
+      atBottom: list.scrollHeight - list.scrollTop - list.clientHeight < 40,
+      scrollTop: list.scrollTop,
+      scrollHeight: list.scrollHeight,
+      anchorId: (anchor as HTMLElement | undefined)?.dataset.messageId,
+      anchorOffset: anchor ? anchor.getBoundingClientRect().top - bounds.top : undefined,
+    };
+  }, []);
 
   useLayoutEffect(() => {
     const list = listRef.current;
@@ -53,10 +71,11 @@ export function MessageFeed({
     if (firstPaintRef.current) {
       list.scrollTop = list.scrollHeight;
       firstPaintRef.current = false;
+      rememberPosition();
       return;
     }
     const previous = readingRef.current;
-    if (!previous) return;
+    if (!previous) { rememberPosition(); return; }
     if (previous.atBottom) {
       list.scrollTop = list.scrollHeight;
     } else {
@@ -70,8 +89,8 @@ export function MessageFeed({
         list.scrollTop = Math.max(0, previous.scrollTop + list.scrollHeight - previous.scrollHeight);
       }
     }
-    readingRef.current = null;
-  }, [messages]);
+    rememberPosition();
+  }, [messages, rememberPosition]);
 
   useEffect(() => {
     let disposed = false;
@@ -120,7 +139,7 @@ export function MessageFeed({
           };
         }
         messagesRef.current = next;
-        setMessages(next);
+        setPolledMessages(next);
       } catch {
         if (!disposed && (!controller.signal.aborted || timedOut)) {
           setNetworkError("Не удалось обновить сообщения. Показана предыдущая переписка; попробуем снова автоматически.");
@@ -135,13 +154,22 @@ export function MessageFeed({
       if (document.visibilityState === "visible") void refresh();
       else activeController?.abort();
     }
+    function messageSent(event: Event) {
+      const detail = (event as CustomEvent<{taskId?:string;channelMemberId?:string|null}>).detail;
+      if (detail?.taskId !== taskId || (detail.channelMemberId || null) !== (channelMemberId || null)) return;
+      activeController?.abort();
+      activeController = null;
+      void refresh();
+    }
 
     const interval = window.setInterval(() => void refresh(), 10_000);
     document.addEventListener("visibilitychange", visibilityChanged);
+    window.addEventListener("ruli:messages-updated", messageSent);
     return () => {
       disposed = true;
       window.clearInterval(interval);
       document.removeEventListener("visibilitychange", visibilityChanged);
+      window.removeEventListener("ruli:messages-updated", messageSent);
       activeController?.abort();
     };
   }, [taskId, channelMemberId]);
@@ -150,7 +178,7 @@ export function MessageFeed({
     <p className={`feed-status${networkError ? " offline" : ""}`} role="status" aria-live="polite">
       {networkError || "Новые сообщения появляются автоматически."}
     </p>
-    <ol ref={listRef} className="message-list" aria-label="Сообщения" aria-live="polite" aria-relevant="additions text" aria-atomic="false">
+    <ol ref={listRef} onScroll={rememberPosition} className="message-list" aria-label="Сообщения" aria-live="polite" aria-relevant="additions text" aria-atomic="false">
       {messages.map(message => <li key={message.id} data-message-id={message.id} className={message.authorId === viewerMemberId ? "message mine" : "message"}>
         <div className="message-meta"><strong>{message.authorName}</strong><time dateTime={message.createdAt}>{messageTime(message.createdAt)}</time></div>
         <p>{message.body}</p>

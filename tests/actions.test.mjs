@@ -7,6 +7,8 @@ import ts from "typescript";
 import * as model from "../lib/ruli/model.ts";
 import * as policy from "../lib/ruli/policy.ts";
 import * as mutations from "../lib/ruli/mutations.ts";
+import * as taskSchedule from "../lib/ruli/task-schedule.ts";
+import { collaborationHarness, makeForm, TestRedirect, redirectMessage } from "./collaboration-helper.mjs";
 
 // Execute the shipped server actions against SQLite, replacing only the hosting
 // boundary (identity, redirects, D1 transport and tree reads). SQL is not mocked.
@@ -78,6 +80,7 @@ function harness() {
     "../lib/ruli/policy": policy,
     "../lib/ruli/model": model,
     "../lib/ruli/mutations": mutations,
+    "../lib/ruli/task-schedule": taskSchedule,
   };
   const exports = {};
   vm.runInNewContext(source, { exports, require(name) { if (!(name in modules)) throw new Error(`Unexpected import ${name}`); return modules[name]; }, FormData, URLSearchParams, crypto, console: { error() {} } });
@@ -293,4 +296,184 @@ test("permissions and expected status prevent unauthorized or stale acceptance",
   const denied = await h.actions.submitResultState({},h.form({result:"Не разрешено"}));
   assert.match(denied.error,/участник этой задачи/);
   assert.ok(h.accessCalls>=7);
+});
+
+// Task and schedule actions share one real SQLite database, exposing bugs at
+// their boundary that separate action unit tests cannot reproduce.
+function integratedHarness(t) {
+  const h = collaborationHarness();
+  t.after(() => h.close());
+  const modules = {
+    "next/navigation": { redirect(url) { throw Object.assign(new TestRedirect(url), {digest:"NEXT_REDIRECT"}); } },
+    "../db": {getD1:() => h.db},
+    "../lib/ruli/data": {loadTree:h.loadTree,getMembers:h.getMembers},
+    "../lib/ruli/access": h.access,
+    "../lib/ruli/policy": policy,
+    "../lib/ruli/model": model,
+    "../lib/ruli/mutations": mutations,
+    "../lib/ruli/task-schedule": taskSchedule,
+  };
+  const exports = {};
+  vm.runInNewContext(source,{exports,require:name=>modules[name],FormData,URLSearchParams,crypto,console});
+  h.taskAction = async (name,values,state=false) => {
+    try { return {state:await (state ? exports[name]({},makeForm(values)) : exports[name](makeForm(values)))}; }
+    catch(error) { if(error instanceof TestRedirect) return {redirect:error.url}; throw error; }
+  };
+  h.task = id => h.one("SELECT * FROM tasks WHERE id=?",id);
+  return h;
+}
+
+const scheduleForm = (taskId,hours=6,limit=8) => ({taskId,version:0,startDate:"2026-11-17",hoursPerDay:limit,estimatedHoursPerTask:hours,weekdaysOnly:"on"});
+function succeeded(result) {
+  assert.equal(redirectMessage(result),null,result.redirect ?? JSON.stringify(result));
+  assert.ok(redirectMessage(result,"flash"),"Expected a successful redirect");
+}
+function reassignForm(h,id,owner) {
+  const task=h.task(id);
+  return {id,version:task.version,title:task.title,owner,size:task.size,theme:task.theme,due:"",description:task.description};
+}
+
+test("reassign transfers schedule executor and advances entry/plan versions atomically",async t=>{
+  const h=integratedHarness(t);
+  succeeded(await h.invoke("generateTaskSchedule",scheduleForm("letter")));
+  const rootVersion=h.task("root").version;
+  succeeded(await h.taskAction("updateTask",reassignForm(h,"letter","max")));
+  assert.equal(h.task("letter").owner_id,"max");
+  assert.deepEqual(h.one("SELECT member_id,version,hours FROM schedule_entries WHERE task_id='letter'"),{member_id:"max",version:2,hours:6});
+  assert.equal(h.one("SELECT version FROM schedule_plans WHERE task_id='letter'").version,2);
+  assert.equal(h.task("root").version,rootVersion+1);
+  // Assigning the group changes neither the leaf owner nor its inherited plan.
+  succeeded(await h.taskAction("updateTask",reassignForm(h,"launch","me")));
+  assert.equal(h.task("letter").owner_id,"max");
+  assert.equal(h.one("SELECT member_id FROM schedule_entries WHERE task_id='letter'").member_id,"max");
+});
+
+test("reassign respects the lower existing plan limit and preserves the submitted form on conflict",async t=>{
+  const h=integratedHarness(t);
+  succeeded(await h.invoke("generateTaskSchedule",scheduleForm("letter",2,8)));
+  succeeded(await h.invoke("generateTaskSchedule",scheduleForm("visuals",4,4)));
+  const before=h.task("letter");
+  const result=await h.taskAction("updateTaskState",{...reassignForm(h,"letter","max"),description:"Keep this text"},true);
+  assert.match(result.state.error,/Нельзя сменить ответственного.*6 ч.*4 ч/);
+  assert.equal(result.state.values.description,"Keep this text");
+  assert.equal(result.state.values.owner,"max");
+  assert.deepEqual(h.task("letter"),before);
+  assert.equal(h.one("SELECT member_id,version FROM schedule_entries WHERE task_id='letter'").member_id,"anna");
+  assert.equal(h.one("SELECT version FROM schedule_plans WHERE task_id='letter'").version,1);
+});
+
+test("reassign rejects a concurrent plan reservation through the root version guard",async t=>{
+  const h=integratedHarness(t);
+  succeeded(await h.invoke("generateTaskSchedule",scheduleForm("letter")));
+  h.hooks.beforeBatch=async()=>{
+    h.hooks.beforeBatch=null;
+    succeeded(await h.invoke("generateTaskSchedule",scheduleForm("visuals",8)));
+  };
+  const result=await h.taskAction("updateTaskState",reassignForm(h,"letter","max"),true);
+  assert.match(result.state.error,/изменилась/);
+  assert.equal(h.task("letter").owner_id,"anna");
+  assert.equal(h.one("SELECT member_id,version FROM schedule_entries WHERE task_id='letter'").version,1);
+  assert.equal(h.one("SELECT version FROM schedule_plans WHERE task_id='letter'").version,1);
+});
+
+test("failure after schedule transfer rolls back task, participant, schedule and plan changes",async()=>{
+  const h=harness();
+  h.sqlite.exec(`INSERT INTO schedule_plans(task_id,version) VALUES ('task',1);
+    INSERT INTO schedule_entries(id,plan_task_id,task_id,member_id,title,start_date,end_date,hours)
+    VALUES ('entry','task','task','anna','Поручение','2026-11-17','2026-11-17',6);`);
+  // Root update comes after the row, participant, entry and plan writes.
+  h.failAt=5;
+  const result=await h.actions.updateTaskState({},h.form({owner:"max",participants:["me"]}));
+  assert.match(result.error,/Не удалось сохранить/);
+  assert.equal(h.row("task").owner_id,"anna");
+  assert.equal(h.row("task").version,1);
+  assert.equal(h.row("root").version,1);
+  assert.deepEqual(h.sqlite.prepare("SELECT member_id FROM task_participants WHERE task_id='task'").all().map(row=>row.member_id),["max"]);
+  assert.equal(h.sqlite.prepare("SELECT member_id,version FROM schedule_entries").get().member_id,"anna");
+  assert.equal(h.sqlite.prepare("SELECT version FROM schedule_entries").get().version,1);
+  assert.equal(h.sqlite.prepare("SELECT version FROM schedule_plans").get().version,1);
+});
+
+test("restore refuses 14h on an 8h day and restores after conflicting reservations are cleared",async t=>{
+  const h=integratedHarness(t);
+  succeeded(await h.invoke("generateTaskSchedule",scheduleForm("letter",6)));
+  succeeded(await h.taskAction("deleteTask",{id:"letter",version:h.task("letter").version}));
+  succeeded(await h.invoke("generateTaskSchedule",scheduleForm("help",8)));
+  const deleted=h.task("letter");
+  const form={id:"letter",version:deleted.version,batchId:deleted.deletion_batch_id};
+  const blocked=await h.taskAction("restoreTask",form);
+  assert.match(redirectMessage(blocked),/Нельзя восстановить ветку.*14 ч.*8 ч/);
+  assert.deepEqual(h.task("letter"),deleted);
+  succeeded(await h.invoke("clearTaskSchedule",{taskId:"help",version:1,confirmClear:"yes"}));
+  succeeded(await h.taskAction("restoreTask",form));
+  assert.equal(h.task("letter").deleted_at,null);
+  assert.equal(h.all(h.collaboration.workloadSelect).reduce((sum,row)=>sum+row.hours,0),6);
+});
+
+test("restoring a whole batch checks plans that were hidden with the parent",async t=>{
+  const h=integratedHarness(t);
+  succeeded(await h.invoke("generateTaskSchedule",scheduleForm("launch",6)));
+  succeeded(await h.taskAction("deleteTask",{id:"launch",version:h.task("launch").version}));
+  succeeded(await h.invoke("generateTaskSchedule",scheduleForm("help",8)));
+  const deleted=h.task("launch");
+  const blocked=await h.taskAction("restoreTask",{id:"launch",version:deleted.version,batchId:deleted.deletion_batch_id});
+  assert.match(redirectMessage(blocked),/Нельзя восстановить ветку/);
+  for(const id of ["launch","letter","visuals"]) assert.ok(h.task(id).deleted_at);
+});
+
+test("restore cannot race a successful plan generation into overbooking",async t=>{
+  const h=integratedHarness(t);
+  succeeded(await h.invoke("generateTaskSchedule",scheduleForm("letter")));
+  succeeded(await h.taskAction("deleteTask",{id:"letter",version:h.task("letter").version}));
+  const deleted=h.task("letter");
+  h.hooks.beforeBatch=async()=>{
+    h.hooks.beforeBatch=null;
+    succeeded(await h.invoke("generateTaskSchedule",scheduleForm("help",8)));
+  };
+  const blocked=await h.taskAction("restoreTask",{id:"letter",version:deleted.version,batchId:deleted.deletion_batch_id});
+  assert.match(redirectMessage(blocked),/данные изменились/);
+  assert.deepEqual(h.task("letter"),deleted);
+});
+
+test("reopening completed work validates released capacity and succeeds after that time is free",async t=>{
+  const h=integratedHarness(t);
+  succeeded(await h.invoke("generateTaskSchedule",scheduleForm("letter")));
+  succeeded(await h.taskAction("submitResult",{id:"letter",version:h.task("letter").version,expectedStatus:"todo",result:"Ready"}));
+  succeeded(await h.taskAction("setStatus",{id:"letter",version:h.task("letter").version,expectedStatus:"review",status:"done"}));
+  assert.equal(h.all(h.collaboration.workloadSelect).length,0);
+  succeeded(await h.invoke("generateTaskSchedule",scheduleForm("help",8)));
+  const form={id:"letter",version:h.task("letter").version,expectedStatus:"done",status:"doing"};
+  const blocked=await h.taskAction("setStatus",form);
+  assert.match(redirectMessage(blocked),/Нельзя вернуть задачу в работу.*14 ч.*8 ч/);
+  assert.equal(h.task("letter").status,"done");
+  assert.equal(h.task("letter").version,form.version);
+  succeeded(await h.invoke("clearTaskSchedule",{taskId:"help",version:1,confirmClear:"yes"}));
+  succeeded(await h.taskAction("setStatus",form));
+  assert.equal(h.task("letter").status,"doing");
+});
+
+test("reopen checks the root version after its capacity read",async t=>{
+  const h=integratedHarness(t);
+  succeeded(await h.invoke("generateTaskSchedule",scheduleForm("letter")));
+  h.sqlite.exec("UPDATE tasks SET status='done' WHERE id='letter'");
+  h.hooks.beforeBatch=async()=>{
+    h.hooks.beforeBatch=null;
+    succeeded(await h.invoke("generateTaskSchedule",scheduleForm("help",8)));
+  };
+  const blocked=await h.taskAction("setStatus",{id:"letter",version:h.task("letter").version,expectedStatus:"done",status:"doing"});
+  assert.match(redirectMessage(blocked),/изменилась/);
+  assert.equal(h.task("letter").status,"done");
+});
+
+test("capacity guards distribute multi-day hours and ignore unrelated existing overload",async()=>{
+  const h=harness();
+  h.sqlite.exec(`INSERT INTO schedule_plans(task_id,version,hours_per_day) VALUES ('task',1,8),('neighbor',1,4);
+    INSERT INTO schedule_entries(id,plan_task_id,task_id,member_id,title,start_date,end_date,hours) VALUES
+    ('incoming','task','task','anna','P','2026-11-17','2026-11-18',12),
+    ('other','neighbor','neighbor','max','Q','2026-11-18','2026-11-18',4);`);
+  const blocked=await h.actions.updateTaskState({},h.form({owner:"max"}));
+  assert.match(blocked.error,/2026-11-18.*10 ч.*4 ч/);
+  h.sqlite.exec("UPDATE schedule_entries SET start_date='2026-12-01',end_date='2026-12-01' WHERE id='other'");
+  await success(h.actions.updateTaskState({},h.form({owner:"max"})));
+  assert.equal(h.row("task").owner_id,"max");
 });

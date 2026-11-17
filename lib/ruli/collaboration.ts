@@ -9,6 +9,7 @@ export type ChatMessage = {
   authorName:string; body:string; createdAt:string;
 };
 export type ScheduleRow = ScheduleEntry & {id:string; planTaskId:string; version:number};
+export type ScheduleWorkloadRow = ScheduleRow & {hoursPerDay:number};
 
 export function taskChannelMembers(node:TaskNode,members:Member[],viewer:AccessContext):Member[] {
   const people=peopleOf(node,new Map(members.map(m=>[m.id,m])));
@@ -21,6 +22,14 @@ export const scheduleSelect = `SELECT s.id,s.plan_task_id AS planTaskId,s.task_i
   s.member_id AS memberId,t.title,s.start_date AS startDate,s.end_date AS endDate,s.hours,s.version
   FROM schedule_entries s JOIN tasks t ON t.id=s.task_id JOIN tasks p ON p.id=s.plan_task_id
   WHERE t.deleted_at IS NULL AND p.deleted_at IS NULL`;
+
+/** Keep done entries in display history, but never reserve capacity for them. */
+export const workloadSelect = `SELECT s.id,s.plan_task_id AS planTaskId,s.task_id AS taskId,
+  s.member_id AS memberId,t.title,s.start_date AS startDate,s.end_date AS endDate,s.hours,s.version,
+  sp.hours_per_day AS hoursPerDay
+  FROM schedule_entries s JOIN tasks t ON t.id=s.task_id JOIN tasks p ON p.id=s.plan_task_id
+  JOIN schedule_plans sp ON sp.task_id=s.plan_task_id
+  WHERE t.deleted_at IS NULL AND p.deleted_at IS NULL AND t.kind='leaf' AND t.status<>'done'`;
 
 export async function loadTaskCollaboration(node:TaskNode,_viewer:AccessContext,channelMemberId?:string) {
   const viewer=await requireAccess();

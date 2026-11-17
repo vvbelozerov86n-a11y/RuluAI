@@ -7,6 +7,7 @@ import { requireAccess } from "../lib/ruli/access";
 import { canManage, canSubmit } from "../lib/ruli/policy";
 import type { ActionState } from "../lib/ruli/action-state";
 import { runMutation, type Statement } from "../lib/ruli/mutations";
+import { taskScheduleConflict } from "../lib/ruli/task-schedule";
 import {
   countNodes, findPath, isBlockSize, isBlockTheme, isTaskStatus,
   MAX_DEPTH, MAX_NODES, ROOT_ID, validateDueDateInput, dueLabelFromISO,
@@ -130,6 +131,13 @@ async function ordinary(form: FormData, operation: Operation, fallback?: string)
 
 async function ensureChanged(changed: boolean) { if (!changed) throw new FormError(CONFLICT); }
 
+function scheduleVersionGuard(rootVersion: number, guard?: Statement): Statement {
+  return {
+    sql: `${guard ? `(${guard.sql}) AND ` : ""}EXISTS (SELECT 1 FROM tasks WHERE id='root' AND version=?)`,
+    params: [...(guard?.params ?? []), rootVersion],
+  };
+}
+
 const create: Operation = async form => {
   await access(form);
   const parentId = str(form, "parent") || ROOT_ID;
@@ -158,13 +166,30 @@ const create: Operation = async form => {
 
 const update: Operation = async form => {
   await access(form);
-  const { node, version } = await nodeFor(form);
+  const { node, version, tree } = await nodeFor(form);
   if (node.id === ROOT_ID) throw new FormError("Корневой блок нельзя изменить.");
   const f = await fields(form);
-  await ensureChanged(await runMutation(getD1(), {
+  const db = getD1();
+  const reassign = node.ownerId !== f.ownerId;
+  if (reassign) {
+    const conflict = await taskScheduleConflict(db, { kind: "reassign", taskId: node.id, ownerId: f.ownerId });
+    if (conflict) throw new FormError(`Нельзя сменить ответственного: ${conflict}`, { owner: conflict });
+  }
+  await ensureChanged(await runMutation(db, {
     id: node.id, version,
+    guard: reassign ? scheduleVersionGuard(tree.version) : undefined,
     set: { sql: "title=?,owner_id=?,size=?,theme=?,due_date=?,due_label=?,description=?", params: [f.title,f.ownerId,f.size,f.theme,f.dueDate,f.dueLabel,f.description] },
-    statements: gate => participantWrites(node.id, f.participants, gate, true),
+    statements: (gate, token) => [
+      ...participantWrites(node.id, f.participants, gate, true),
+      ...(reassign ? [{
+        sql: `UPDATE schedule_entries SET member_id=?,version=version+1 WHERE task_id=? AND ${gate.sql}`,
+        params: [f.ownerId, node.id, ...gate.params],
+      }, {
+        sql: `UPDATE schedule_plans SET version=version+1,last_mutation_id=?
+          WHERE task_id IN (SELECT plan_task_id FROM schedule_entries WHERE task_id=?) AND ${gate.sql}`,
+        params: [token, node.id, ...gate.params],
+      }] : []),
+    ],
   }));
   return { id: node.id, message: "Блок обновлён." };
 };
@@ -225,10 +250,12 @@ export async function restoreTask(form: FormData): Promise<void> {
       UNION ALL SELECT t.id,b.depth+1 FROM tasks t JOIN branch b ON t.parent_id=b.id WHERE t.deletion_batch_id=?
     ) SELECT MAX(depth) AS depth FROM branch`).bind(id,batchId,batchId).first<{ depth: number }>();
     if (parentPath.length + Number(depth?.depth ?? 1) > MAX_DEPTH) throw new FormError(`Восстановление превысит ${MAX_DEPTH} уровней.`);
+    const conflict = await taskScheduleConflict(db, { kind: "restore", batchId });
+    if (conflict) throw new FormError(`Нельзя восстановить ветку: ${conflict}`);
     const restored = await runMutation(db, {
       id,version,deleted:true,
-      guard: { sql: `deletion_batch_id=? AND EXISTS (SELECT 1 FROM tasks p WHERE p.id=? AND p.kind='group' AND p.deleted_at IS NULL)
-        AND (SELECT COUNT(*) FROM tasks WHERE deleted_at IS NULL OR deletion_batch_id=?)<=?`, params: [batchId,deleted.parentId,batchId,MAX_NODES] },
+      guard: scheduleVersionGuard(tree.version, { sql: `deletion_batch_id=? AND EXISTS (SELECT 1 FROM tasks p WHERE p.id=? AND p.kind='group' AND p.deleted_at IS NULL)
+        AND (SELECT COUNT(*) FROM tasks WHERE deleted_at IS NULL OR deletion_batch_id=?)<=?`, params: [batchId,deleted.parentId,batchId,MAX_NODES] }),
       set: {
         sql: "deleted_at=NULL,deletion_batch_id=NULL,position=COALESCE((SELECT MAX(position)+1 FROM tasks sibling WHERE sibling.parent_id=? AND sibling.deleted_at IS NULL),0)",
         params: [deleted.parentId],
@@ -340,16 +367,21 @@ function expectedStatus(form: FormData, node: TaskNode): string {
 export async function setStatus(form: FormData): Promise<void> {
   return ordinary(form,async form => {
     await access(form);
-    const {node,version} = await nodeFor(form);
+    const {node,version,tree} = await nodeFor(form);
     const expected = expectedStatus(form,node);
     const status = str(form,"status");
     const allowed = (status === "done" && expected === "review" && Boolean(node.result.trim())) ||
       (status === "doing" && ["review","done","todo"].includes(expected)) ||
       (status === "todo" && expected === "doing");
     if (node.kind !== "leaf" || !allowed) throw new FormError("Этот переход статуса недоступен. Принять можно только результат, переданный на проверку.");
+    const reopen = expected === "done" && status === "doing";
+    if (reopen) {
+      const conflict = await taskScheduleConflict(getD1(), { kind: "reopen", taskId: node.id });
+      if (conflict) throw new FormError(`Нельзя вернуть задачу в работу: ${conflict}`);
+    }
     await ensureChanged(await runMutation(getD1(),{
       id:node.id,version,status:expected,
-      guard:{sql:"kind='leaf'",params:[]},
+      guard:reopen ? scheduleVersionGuard(tree.version,{sql:"kind='leaf'",params:[]}) : {sql:"kind='leaf'",params:[]},
       set:{sql:"status=?",params:[status]},
     }));
     return {id:node.id,message:status === "done" ? "Результат принят." : status === "doing" ? "Задача возвращена в работу." : "Задача возвращена в очередь."};

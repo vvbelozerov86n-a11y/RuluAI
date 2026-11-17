@@ -10,6 +10,9 @@ export type ScheduleEntry = {
   hours: number;
 };
 
+/** Active reservations only; completed work belongs in display history. */
+export type ScheduleWorkloadEntry = ScheduleEntry & { hoursPerDay?: number };
+
 export type ScheduleOptions = {
   startDate: string;
   hoursPerDay: number;
@@ -27,6 +30,19 @@ const EPSILON = 1e-7;
 
 function dayNumber(iso: string): number {
   return new Date(`${iso}T12:00:00Z`).getTime() / DAY_MS;
+}
+
+/** Every plan sharing a member/day keeps its limit, including a stricter one. */
+export function scheduleCapacityOnDate(
+  entries: ScheduleWorkloadEntry[], memberId: string, date: string, hoursPerDay = 12,
+): { hours: number; limit: number } {
+  let hours = 0, limit = hoursPerDay;
+  for (const entry of entries) {
+    if (entry.memberId !== memberId || entry.startDate > date || entry.endDate < date) continue;
+    hours += entry.hours / (dayNumber(entry.endDate) - dayNumber(entry.startDate) + 1);
+    limit = Math.min(limit, entry.hoursPerDay ?? 12);
+  }
+  return { hours, limit };
 }
 
 /** Inclusive calendar range; no host timezone or DST arithmetic. */
@@ -70,7 +86,7 @@ type Candidate = { task: TaskNode; deadlines: Deadline[] };
 export function generateSchedule(
   node: TaskNode,
   options: ScheduleOptions,
-  existing: ScheduleEntry[] = [],
+  existing: ScheduleWorkloadEntry[] = [],
 ): { entries: ScheduleEntry[]; warnings: string[] } {
   const error = validateScheduleOptions(options);
   if (error) throw new RangeError(error);
@@ -106,26 +122,32 @@ export function generateSchedule(
   const startWeekday = new Date(`${options.startDate}T12:00:00Z`).getUTCDay();
   const owners = new Set(candidates.map(({ task }) => task.ownerId));
   const workload = new Map<string, Map<number, number>>();
-  for (const owner of owners) workload.set(owner, new Map());
+  const limits = new Map<string, Map<number, number>>();
+  for (const owner of owners) {
+    workload.set(owner, new Map());
+    limits.set(owner, new Map());
+  }
   for (const item of existing) {
     if (!item || typeof item.taskId !== "string" || !item.taskId || typeof item.memberId !== "string" || !item.memberId) {
       throw new RangeError("Существующая запись графика должна содержать задачу и исполнителя");
     }
-    const issue = validateScheduleRange(item.startDate, item.endDate, item.hours);
+    const issue = validateScheduleRange(item.startDate, item.endDate, item.hours, item.hoursPerDay ?? 12);
     if (issue) throw new RangeError(`Некорректная запись графика «${item.title || item.taskId}»: ${issue}`);
     const reserved = workload.get(item.memberId);
     if (!reserved) continue;
+    const dailyLimits = limits.get(item.memberId)!;
     const from = dayNumber(item.startDate) - start;
     const to = dayNumber(item.endDate) - start;
     const dailyHours = item.hours / (to - from + 1);
     for (let day = Math.max(0, from); day <= Math.min(horizon - 1, to); day++) {
       reserved.set(day, (reserved.get(day) ?? 0) + dailyHours);
+      dailyLimits.set(day, Math.min(dailyLimits.get(day) ?? options.hoursPerDay, item.hoursPerDay ?? 12));
     }
   }
   const isWorkingDay = (day: number) => !options.weekdaysOnly || ![0, 6].includes((startWeekday + day) % 7);
   for (const [owner, reserved] of workload) {
-    const overloaded = [...reserved].filter(([day, hours]) => isWorkingDay(day) && hours > options.hoursPerDay + EPSILON).length;
-    if (overloaded) warnings.push(`Исполнитель ${owner}: существующая загрузка превышает ${options.hoursPerDay} ч/день в ${overloaded} днях. Новые часы в эти дни не добавлены.`);
+    const overloaded = [...reserved].filter(([day, hours]) => isWorkingDay(day) && hours > (limits.get(owner)!.get(day) ?? options.hoursPerDay) + EPSILON).length;
+    if (overloaded) warnings.push(`Исполнитель ${owner}: существующая загрузка превышает дневной лимит в ${overloaded} днях. Новые часы в эти дни не добавлены.`);
   }
 
   const cursor = new Map<string, number>();
@@ -134,12 +156,13 @@ export function generateSchedule(
   for (const { task, deadlines } of candidates) {
     if (entryLimitReached) { notScheduled.push(task.title); continue; }
     const reserved = workload.get(task.ownerId)!;
+    const dailyLimits = limits.get(task.ownerId)!;
     let day = cursor.get(task.ownerId) ?? 0;
     let remaining = estimate;
     const allocation: { day: number; hours: number }[] = [];
     while (remaining > EPSILON && day < horizon) {
       if (isWorkingDay(day)) {
-        const available = Math.max(0, options.hoursPerDay - (reserved.get(day) ?? 0));
+        const available = Math.max(0, (dailyLimits.get(day) ?? options.hoursPerDay) - (reserved.get(day) ?? 0));
         if (available > EPSILON) {
           if (entries.length + allocation.length >= MAX_SCHEDULE_ENTRIES) { entryLimitReached = true; break; }
           const hours = Math.min(remaining, available);
@@ -170,7 +193,7 @@ export function generateSchedule(
     }
   }
   for (const deadline of deadlineIssues.values()) {
-    warnings.push(`«${deadline.title}»: срок ${deadline.date} недостижим при заданной загрузке; расчётное окончание ${deadline.endDate}.`);
+    warnings.push(`«${deadline.title}»: срок ${deadline.date} не соблюдается при текущем порядке задач и заданной загрузке; расчётное окончание ${deadline.endDate}.`);
   }
   if (notScheduled.length) {
     const reason = entryLimitReached ? `лимит ${MAX_SCHEDULE_ENTRIES} записей` : `горизонт ${horizon} календарных дней`;

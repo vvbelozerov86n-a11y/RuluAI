@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { addDaysISO } from "../lib/ruli/model.ts";
 import {
   generateSchedule,
+  scheduleCapacityOnDate,
   validateScheduleOptions,
   validateScheduleRange,
   MAX_SCHEDULE_DAYS,
@@ -69,7 +70,35 @@ test("невозможный срок поручения и родительск
   assert.equal(result.entries.at(-1).endDate, "2026-11-18");
   assert.equal(result.warnings.length, 2);
   assert.ok(result.warnings.some((message) => /letter.*2026-11-17.*2026-11-18/.test(message)));
-  assert.ok(result.warnings.some((message) => /Запуск.*недостижим/.test(message)));
+  assert.ok(result.warnings.some((message) => /Запуск.*при текущем порядке задач/.test(message)));
+});
+
+test("общая дневная загрузка соблюдает самый строгий лимит соседних планов", () => {
+  const existing = [existingEntry({ hours: 2, hoursPerDay: 4 })];
+  const result = generateSchedule(leaf("new"), options({ hoursPerDay: 8 }), existing);
+  assert.deepEqual(result.entries.map(entry => [entry.startDate, entry.hours]), [["2026-11-17", 2], ["2026-11-18", 2]]);
+  assert.deepEqual(scheduleCapacityOnDate(existing, "anna", "2026-11-17", 8), { hours: 2, limit: 4 });
+  assert.deepEqual(scheduleCapacityOnDate(existing, "anna", "2026-11-17", 1), { hours: 2, limit: 1 });
+  assert.deepEqual(scheduleCapacityOnDate(existing, "max", "2026-11-17", 8), { hours: 0, limit: 8 });
+  assert.deepEqual(scheduleCapacityOnDate(existing, "anna", "2026-11-18", 8), { hours: 0, limit: 8 });
+});
+
+test("лимит интервала применяется каждый день, а после его окончания освобождается", () => {
+  const existing = [existingEntry({ endDate: "2026-11-18", hours: 4, hoursPerDay: 4 })];
+  const result = generateSchedule(leaf("new"), options({ hoursPerDay: 8, estimatedHoursPerTask: 8 }), existing);
+  assert.deepEqual(result.entries.map(entry => [entry.startDate, entry.hours]), [["2026-11-17", 2], ["2026-11-18", 2], ["2026-11-19", 4]]);
+  assert.deepEqual(scheduleCapacityOnDate(existing, "anna", "2026-11-18", 8), { hours: 2, limit: 4 });
+});
+
+test("предупреждение о сроке объясняет текущий порядок, а не невозможность любого графика", () => {
+  const later = leaf("later", { dueDate: "2026-11-18" });
+  const urgent = leaf("urgent", { dueDate: "2026-11-17" });
+  const opts = options({ hoursPerDay: 4 });
+  const current = generateSchedule(group([later, urgent]), opts);
+  assert.equal(current.warnings.length, 1);
+  assert.match(current.warnings[0], /при текущем порядке задач/);
+  assert.doesNotMatch(current.warnings[0], /недостижим/);
+  assert.deepEqual(generateSchedule(group([urgent, later]), opts).warnings, []);
 });
 
 test("перегруженные существующие дни дают предупреждение и не получают новой работы", () => {
