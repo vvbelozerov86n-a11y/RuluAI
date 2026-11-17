@@ -13,6 +13,6 @@ export default async function Home({searchParams}:{searchParams:Promise<Record<s
   const [tree,members]=await Promise.all([loadTree(),getMembers()]);
   const mode:ViewMode=params.mode==="build"&&canManage(viewer)?"build":"view";
   const deliveries=canManage(viewer)?deliverySummaries(await listTaskDeliveries(getD1(),tree.id)):[];
-  return <GroupView node={tree} path={[tree]} members={members} mode={mode} layout={params.layout==="cards"?"cards":"list"} today={todayISO()} viewer={viewer} flash={one(params.flash)} error={one(params.error)} channel={one(params.chat)} filters={{q:one(params.q),owner:one(params.owner),status:one(params.status),late:params.late==="1"?"1":undefined,due:params.due==="today"?"today":undefined}} deliveries={deliveries}/>;
+  return <GroupView node={tree} path={[tree]} members={members} mode={mode} layout={params.layout==="list"?"list":"cards"} today={todayISO()} viewer={viewer} flash={one(params.flash)} error={one(params.error)} channel={one(params.chat)} filters={{q:one(params.q),owner:one(params.owner),status:one(params.status),late:params.late==="1"?"1":undefined,due:params.due==="today"?"today":undefined}} deliveries={deliveries}/>;
 }
 

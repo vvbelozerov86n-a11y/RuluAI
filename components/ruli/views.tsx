@@ -51,7 +51,7 @@ export function TaskCard({node,index,siblingCount,mode,members,today,viewer,path
   </article>;
 }
 
-function viewHref(id:string,layout:OverviewLayout="list",mode:ViewMode="view") {return taskHref(id,mode)+(layout==="cards"?"&layout=cards":"");}
+function viewHref(id:string,layout:OverviewLayout="cards",mode:ViewMode="view") {return `${taskHref(id,mode)}&layout=${layout}`;}
 
 function TaskContents({detail=false}:{detail?:boolean}) {
   return <nav className="task-contents" aria-label="Перейти к разделу"><span>Перейти к разделу:</span><a href={detail?"#task-details":"#task-list"}>{detail?"Описание и результат":"Задачи"}</a><a href="#discussion">Обсуждение</a><a href="#schedule">График выполнения</a></nav>;
@@ -96,7 +96,7 @@ function TaskSearch({tree,members,filters,today,layout}:{tree:TaskNode;members:M
 }
 
 type ViewProps={node:TaskNode;path:TaskNode[];mode:ViewMode;members:Member[];today:string;viewer:AccessContext;flash?:string;error?:string;channel?:string;filters?:TaskFilters;layout?:OverviewLayout;deliveries?:DeliverySummary[]};
-export function GroupView({node,path,mode,members,today,viewer,flash,error,channel,filters:rawFilters={},layout="list",deliveries=[]}:ViewProps) {
+export function GroupView({node,path,mode,members,today,viewer,flash,error,channel,filters:rawFilters={},layout="cards",deliveries=[]}:ViewProps) {
   const filters=normalizeTaskFilters(rawFilters),isRoot=node.id===ROOT_ID,s=stats(node,today),owner=members.find(m=>m.id===node.ownerId),manager=canManage(viewer),filtered=isRoot&&hasTaskFilters(filters),cards=layout==="cards"||mode==="build",children=node.children.filter(child=>!child.deletedAt);
   const canUnnest=node.kind==="group"&&node.children.length===1&&node.children[0].kind==="leaf"&&node.children[0].splitSourceId===node.id;
   return <main className={`workspace task-overview${mode==="build"?" is-building":""}`}>
@@ -107,7 +107,7 @@ export function GroupView({node,path,mode,members,today,viewer,flash,error,chann
       </div>
     </div>
     {isRoot?<><AttentionSummary tree={node} today={today} filters={filters}/><TaskSearch tree={node} members={members} filters={filters} today={today} layout={layout}/></>:<><div className="context-strip"><span><span className="label">ОТВЕТСТВЕННЫЙ</span>{owner?<OwnerChip member={owner}/>:null}</span><span><span className="label">СРОК</span>{node.dueLabel}</span><span className="parent-progress">{s.done} из {s.total} выполнено</span>{manager?<Link href={`/t/${node.id}/edit?mode=${mode}`}>Изменить группу</Link>:null}</div>{manager&&canUnnest?<form className="unnest-form" action={unnestTask}><MutationFields node={node} mode={mode}/><SubmitButton className="secondary">Отменить разбиение на подзадачи</SubmitButton></form>:null}</>}
-    {!filtered?<><TaskContents/><div className="overview-list-toolbar" id="task-list"><h2>{isRoot?"Задачи и группы":"В этой группе"}<span> · {children.length}</span></h2><nav className="overview-view-switch" aria-label="Представление задач"><Link href={viewHref(node.id)} aria-current={!cards&&mode==="view"?"page":undefined}>Список</Link><Link href={viewHref(node.id,"cards")} aria-current={cards&&mode==="view"?"page":undefined}>Карточки</Link>{manager?<Link href={viewHref(node.id,"cards","build")} aria-current={mode==="build"?"page":undefined}>Изменить структуру</Link>:null}</nav></div>
+    {!filtered?<><TaskContents/><div className="overview-list-toolbar" id="task-list"><h2>{isRoot?"Задачи и группы":"В этой группе"}<span> · {children.length}</span></h2><nav className="overview-view-switch" aria-label="Представление задач"><Link href={viewHref(node.id,"list")} aria-current={!cards&&mode==="view"?"page":undefined}>Список</Link><Link href={viewHref(node.id,"cards")} aria-current={cards&&mode==="view"?"page":undefined}>Карточки</Link>{manager?<Link href={viewHref(node.id,"cards","build")} aria-current={mode==="build"?"page":undefined}>Изменить структуру</Link>:null}</nav></div>
       {children.length?cards?<><div className="builder-legend"><span><i className="legend-square human"/>Люди</span><span><i className="legend-square bot"/>AI-боты</span><small>Нажмите на счётчик, чтобы увидеть участников</small></div><section className="grid bento-grid" aria-label={isRoot?"Задачи и группы":"Подзадачи"}>{children.map((child,index)=><TaskCard key={child.id} node={child} path={[...path,child]} index={index} siblingCount={children.length} mode={mode} members={members} today={today} viewer={viewer}/>)}</section></>:<CompactTaskList entries={children.map(child=>({node:child,path:[...path,child]}))} members={members} today={today} mode={mode}/>:<div className="empty-state"><h2>Здесь пока нет задач</h2><p>{manager?"Добавьте первый шаг и назначьте ответственного.":"Руководитель добавит задачи в эту группу."}</p>{manager?<Link className="secondary" href={`/new?parent=${node.id}&mode=${mode}`}>Добавить задачу</Link>:null}</div>}
     </>:null}
     <BotDeliveryStatus rows={deliveries} manager={manager} taskId={node.id} version={node.version} mode={mode}/>
