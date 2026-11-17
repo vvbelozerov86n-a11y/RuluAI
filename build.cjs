@@ -1,0 +1,1 @@
+const fs=require('node:fs');const path=require('node:path');fs.mkdirSync(path.join(__dirname,'dist'),{recursive:true});fs.cpSync(path.join(__dirname,'designs'),path.join(__dirname,'dist'),{recursive:true});console.log('Static designs copied to dist');
