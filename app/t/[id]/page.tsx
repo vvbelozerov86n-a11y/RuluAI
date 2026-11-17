@@ -1,6 +1,6 @@
 import type {Metadata} from "next";
 import {notFound} from "next/navigation";
-import {DetailView,GroupView,type ViewMode} from "@/components/ruli/views";
+import {DetailView,GroupView,type ViewMode,type OverviewLayout} from "@/components/ruli/views";
 import {getMembers,loadTree} from "@/lib/ruli/data";
 import {findPath,todayISO} from "@/lib/ruli/model";
 import {requireAccess,canManage} from "@/lib/ruli/access";
@@ -17,7 +17,8 @@ export default async function TaskPage({params,searchParams}:PageProps) {
   const [tree,members]=await Promise.all([loadTree(),getMembers()]);
   const path=findPath(id,tree);if(!path)notFound();
   const node=path.at(-1)!,mode:ViewMode=query.mode==="build"&&canManage(viewer)?"build":"view";
-  const common={path,members,mode,today:todayISO(),viewer,flash:one(query.flash),error:one(query.error),channel:one(query.chat)};
+  const layout:OverviewLayout=query.layout==="cards"?"cards":"list";
+  const common={path,members,mode,layout,today:todayISO(),viewer,flash:one(query.flash),error:one(query.error),channel:one(query.chat)};
   return node.kind==="group"?<GroupView node={node} {...common}/>:<DetailView node={node} {...common}/>;
 }
 

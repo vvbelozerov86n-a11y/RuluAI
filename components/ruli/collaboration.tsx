@@ -30,7 +30,11 @@ export async function TaskCollaboration({node,members,viewer,channel,mode="view"
   const groups=new Map<string,typeof data.entries>();
   for(const entry of data.entries){const rows=groups.get(entry.memberId)??[];rows.push(entry);groups.set(entry.memberId,rows);}
   return <section className="collaboration" id="collaboration" aria-label="Обсуждение и график выполнения">
-    <nav className="section-tabs" aria-label="Разделы задачи"><a href="#discussion">Обсуждение</a><a href="#schedule">График выполнения</a></nav>
+    <div className="collaboration-context">
+      <div className="collaboration-context-title"><span>Текущая задача</span><a href="#task-title">{node.title}</a></div>
+      <nav aria-label="Перейти к разделу совместной работы"><a href="#discussion">К обсуждению ↓</a><a href="#schedule">К графику ↓</a></nav>
+      <p>Открыт чат: <strong>{selectedMember?`личный · ${selectedMember.name}`:"общий"}</strong></p>
+    </div>
     <section className="collaboration-panel" id="discussion" aria-labelledby="discussion-title">
       <div className="panel-heading"><div><h2 id="discussion-title">Обсуждение</h2><p>Вопросы, решения и договорённости по этой задаче.</p></div></div>
       {unavailable?<p className="page-notice error" role="alert">Этот личный диалог недоступен. Открыт общий чат задачи.</p>:null}

@@ -1,0 +1,26 @@
+.ai-setup{margin:20px 0 24px;padding:20px;border:1px solid #cbd5cf;border-radius:14px;background:#f7faf7;color:#23332c}
+.ai-setup h3{margin:0 0 8px;font-size:20px;line-height:1.4}
+.ai-setup p{line-height:1.6;margin:8px 0}
+.ai-setup-steps{margin:18px 0 0;padding-left:28px;display:grid;gap:24px}
+.ai-setup-steps>li{padding-left:6px}
+.ai-setup-steps>li::marker{font-weight:700;color:#24543c}
+.ai-setup h4{font-size:16px;line-height:1.5;margin:0 0 10px}
+.ai-setup label{display:grid;gap:6px;font-size:14px;font-weight:600;max-width:420px}
+.ai-setup input,.ai-setup select{min-height:44px;width:100%;padding:9px 12px;background:#fff;border:1px solid #879d90;border-radius:8px;color:#20342a;font:inherit;box-sizing:border-box}
+.ai-setup a{color:#215f43;text-decoration:underline;text-underline-offset:3px}
+.ai-setup .ai-setup-note{font-size:13px;color:#4f6257}
+.ai-setup-key{display:flex;flex-wrap:wrap;align-items:center;gap:12px}
+.ai-setup-key code{padding:8px 10px;background:#e7eee8;border-radius:6px;font-size:14px;overflow-wrap:anywhere;user-select:all}
+.ai-setup button{min-height:44px}
+.ai-setup-copy{font-size:13px;color:#375940;min-height:1.6em}
+.ai-setup-status{margin:12px 0;padding:10px 14px;background:#fff;border:1px solid #d1dcd4;border-radius:8px}
+.ai-setup-status p{margin:3px 0}
+.ai-setup-success{border-left:3px solid #267547;padding:8px 12px;color:#245c3b;background:#edf6ee}
+.ai-setup :is(input,select,button,a):focus-visible{outline:3px solid #30794f;outline-offset:3px}
+.bento .editor-panel .ai-settings .ai-setup :is(h3,h4,label,p){color:#23332c}
+.bento .editor-panel .ai-settings .ai-setup .ai-setup-note{color:#4f6257}
+.bento .editor-panel .ai-settings .ai-setup a{color:#215f43}
+.bento .editor-panel .ai-settings .ai-setup :is(input,select){background:#fff;color:#20342a;border-color:#879d90;min-height:44px}
+.bento .editor-panel .ai-settings .ai-setup .form-error{color:#94392d;background:#fff0ed;border-color:#bc6755;padding:10px 12px;border-radius:6px}
+.bento .editor-panel .ai-settings .ai-setup .ai-setup-success{color:#245c3b}
+@media(max-width:600px){.ai-setup{padding:16px 12px}.ai-setup-steps{padding-left:22px}.ai-setup-key{align-items:flex-start;flex-direction:column}.ai-setup-check>.primary{width:100%}}

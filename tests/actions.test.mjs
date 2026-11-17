@@ -97,21 +97,51 @@ function harness() {
 }
 
 async function success(promise) {
-  await assert.rejects(promise, error => error.digest === "NEXT_REDIRECT" && !new URL(error.url,"https://local").searchParams.has("error"));
+  let destination;
+  await assert.rejects(promise, error => {
+    if (error.digest !== "NEXT_REDIRECT") return false;
+    destination = new URL(error.url,"https://local");
+    return !destination.searchParams.has("error");
+  });
+  return destination;
 }
 async function rejectedAction(promise, pattern) {
   await assert.rejects(promise, error => error.digest === "NEXT_REDIRECT" && pattern.test(new URL(error.url,"https://local").searchParams.get("error") ?? ""));
 }
 
-test("creating saves description and deduplicates participants in one batch", async () => {
+test("creating opens the new task and saves description, deadline and participants in one batch", async () => {
   const h = harness();
-  const form = h.form({parent:"group",parentVersion:1,description:"Точное ТЗ, которое нельзя потерять",participants:["anna","max","max"]});
-  await success(h.actions.createTaskState({},form));
+  const form = h.form({parent:"group",parentVersion:1,due:"2026-12-01",description:"Точное ТЗ, которое нельзя потерять",participants:["anna","max","max"]});
+  const destination = await success(h.actions.createTaskState({},form));
   const row = h.sqlite.prepare("SELECT * FROM tasks WHERE id LIKE 'task-%'").get();
+  assert.equal(destination.pathname,`/t/${row.id}`);
+  assert.equal(destination.searchParams.get("mode"),"build");
+  assert.equal(destination.searchParams.get("flash"),"Задача создана.");
+  assert.equal(row.parent_id,"group");
+  assert.equal(row.kind,"leaf");
+  assert.equal(row.due_date,"2026-12-01");
   assert.equal(row.description,"Точное ТЗ, которое нельзя потерять");
   assert.deepEqual(h.sqlite.prepare("SELECT member_id FROM task_participants WHERE task_id=?").all(row.id).map(x=>x.member_id),["max"]);
   assert.equal(h.row("group").version,2);
   assert.equal(h.row("root").version,2);
+});
+
+test("creating a group opens that group and preserves its deadline and participants",async()=>{
+  const h=harness();
+  const destination=await success(h.actions.createTaskState({},h.form({
+    parent:"root",parentVersion:1,nested:"on",mode:"view",title:"Новая группа задач",
+    due:"2026-12-10",description:"Общая цель команды",participants:["me","max"],
+  })));
+  const row=h.sqlite.prepare("SELECT * FROM tasks WHERE id LIKE 'task-%'").get();
+  assert.equal(destination.pathname,`/t/${row.id}`);
+  assert.equal(destination.searchParams.get("mode"),"view");
+  assert.equal(destination.searchParams.get("flash"),"Группа задач создана — добавьте подзадачи.");
+  assert.equal(row.parent_id,"root");
+  assert.equal(row.kind,"group");
+  assert.equal(row.status,null);
+  assert.equal(row.due_date,"2026-12-10");
+  assert.equal(row.description,"Общая цель команды");
+  assert.deepEqual(h.sqlite.prepare("SELECT member_id FROM task_participants WHERE task_id=? ORDER BY member_id").all(row.id).map(item=>item.member_id),["max","me"]);
 });
 
 test("oversize text and impossible dates return complete form values without a write", async () => {
@@ -402,7 +432,7 @@ test("restore refuses 14h on an 8h day and restores after conflicting reservatio
   const deleted=h.task("letter");
   const form={id:"letter",version:deleted.version,batchId:deleted.deletion_batch_id};
   const blocked=await h.taskAction("restoreTask",form);
-  assert.match(redirectMessage(blocked),/Нельзя восстановить ветку.*14 ч.*8 ч/);
+  assert.match(redirectMessage(blocked),/Нельзя восстановить задачу.*14 ч.*8 ч/);
   assert.deepEqual(h.task("letter"),deleted);
   succeeded(await h.invoke("clearTaskSchedule",{taskId:"help",version:1,confirmClear:"yes"}));
   succeeded(await h.taskAction("restoreTask",form));
@@ -417,7 +447,7 @@ test("restoring a whole batch checks plans that were hidden with the parent",asy
   succeeded(await h.invoke("generateTaskSchedule",scheduleForm("help",8)));
   const deleted=h.task("launch");
   const blocked=await h.taskAction("restoreTask",{id:"launch",version:deleted.version,batchId:deleted.deletion_batch_id});
-  assert.match(redirectMessage(blocked),/Нельзя восстановить ветку/);
+  assert.match(redirectMessage(blocked),/Нельзя восстановить задачу/);
   for(const id of ["launch","letter","visuals"]) assert.ok(h.task(id).deleted_at);
 });
 

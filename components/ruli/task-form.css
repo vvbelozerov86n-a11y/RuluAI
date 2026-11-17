@@ -1,0 +1,106 @@
+.task-editor .task-type-options > div {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.task-editor .editor-panel .task-type-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0;
+  padding: 15px;
+  border: 1px solid #48636b;
+  border-radius: 8px;
+  background: #17272d;
+  cursor: pointer;
+}
+
+.task-editor .task-type-choice:has(input:checked) {
+  background: #27413f;
+  border-color: #addbc3;
+}
+
+.task-editor .task-type-choice:has(input:focus-visible) {
+  outline: 2px solid #b9ddc8;
+  outline-offset: 3px;
+}
+
+.task-editor .task-type-choice input {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  margin: 3px 0 0;
+  accent-color: #addbc3;
+}
+
+.task-editor .task-type-choice strong {
+  display: block;
+  color: #e0eee6;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.task-editor .task-type-choice small {
+  display: block;
+  margin-top: 5px;
+  color: #b7cec7;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.task-editor .task-form-extra {
+  margin: 14px 0;
+  padding: 14px 16px;
+  border: 1px solid #48636b;
+  border-radius: 8px;
+  background: #17272d;
+}
+
+.task-editor .task-form-extra > summary {
+  min-height: 24px;
+  color: #dcece2;
+  font-size: 14px;
+  line-height: 1.6;
+  cursor: pointer;
+}
+
+.task-editor .task-form-extra > summary > span {
+  margin-left: 8px;
+  color: #b7cec7;
+  font-size: 12px;
+}
+
+.task-editor .task-form-extra > summary:focus-visible {
+  outline: 2px solid #b9ddc8;
+  outline-offset: 5px;
+}
+
+.task-editor .task-form-extra[open] > summary {
+  margin-bottom: 14px;
+}
+
+.task-editor .editor-panel .task-form-extra > p {
+  color: #b7cec7;
+}
+
+.task-editor .task-field-hint {
+  margin-left: 5px;
+  font-size: 11px;
+  font-weight: 400;
+}
+
+@media (max-width: 550px) {
+  .task-editor .task-type-options > div {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .task-editor .task-form-extra > summary > span {
+    display: block;
+    margin-left: 18px;
+  }
+
+  .task-editor .dialog-actions {
+    flex-wrap: wrap;
+  }
+}

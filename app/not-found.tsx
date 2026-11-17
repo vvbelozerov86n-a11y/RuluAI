@@ -9,7 +9,7 @@ export default function NotFound() {
         <div className="editor-panel">
           <span className="editor-eyebrow">404</span>
           <h1>Задача не найдена</h1>
-          <p>Блок мог быть удалён или перемещён. Вернитесь ко всем задачам и откройте нужный уровень заново.</p>
+          <p>Задача могла быть удалена или перемещена. Вернитесь ко всем задачам и откройте её заново.</p>
           <div className="dialog-actions">
             <Link className="primary" href="/">
               Ко всем задачам

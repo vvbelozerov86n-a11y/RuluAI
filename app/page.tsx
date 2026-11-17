@@ -8,6 +8,6 @@ export default async function Home({searchParams}:{searchParams:Promise<Record<s
   const viewer=await requireAccess(),params=await searchParams;
   const [tree,members]=await Promise.all([loadTree(),getMembers()]);
   const mode:ViewMode=params.mode==="build"&&canManage(viewer)?"build":"view";
-  return <GroupView node={tree} path={[tree]} members={members} mode={mode} today={todayISO()} viewer={viewer} flash={one(params.flash)} error={one(params.error)} channel={one(params.chat)} filters={{q:one(params.q),owner:one(params.owner),status:one(params.status),late:params.late==="1"?"1":undefined}}/>;
+  return <GroupView node={tree} path={[tree]} members={members} mode={mode} layout={params.layout==="cards"?"cards":"list"} today={todayISO()} viewer={viewer} flash={one(params.flash)} error={one(params.error)} channel={one(params.chat)} filters={{q:one(params.q),owner:one(params.owner),status:one(params.status),late:params.late==="1"?"1":undefined,due:params.due==="today"?"today":undefined}}/>;
 }
 

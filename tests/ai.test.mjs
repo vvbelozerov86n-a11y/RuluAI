@@ -225,3 +225,90 @@ test("AI busy response remains retryable without resending a saved human message
   assert.equal(h.all("SELECT id FROM task_messages WHERE author_id='me'").length,2);
   assert.equal(h.all("SELECT id FROM task_messages WHERE author_id='analyst'").length,2);
 });
+
+test("AI connection diagnostic is manager-only before reading credentials or generating",async t=>{
+  const h=harness(t);
+  for(const role of ["viewer","anna","max"]){
+    h.as(role);
+    const result=await h.invoke("testAiConnectionState",{provider:"xai",model:"test-model",apiKey:"forged-secret"});
+    assert.match(result.error,/только руководитель/);
+    assert.equal(result.result,undefined);
+    assert.doesNotMatch(JSON.stringify(result),/forged-secret/);
+  }
+  assert.equal(h.requests.length,0);
+  const diagnostic=h.ai.createAiEngine({
+    requireAccess:async()=>({role:"viewer"}),
+    getApiKey(){assert.fail("Unauthorized diagnostic read a key");},
+    generate(){assert.fail("Unauthorized diagnostic called a provider");},
+  });
+  await assert.rejects(()=>diagnostic.testAiConnection({provider:"xai",model:"test-model"}),/только руководитель/);
+});
+
+test("AI connection diagnostic reports the missing key without a paid request",async t=>{
+  const h=harness(t);delete h.env.XAI_API_KEY;
+  const result=await h.invoke("testAiConnectionState",{provider:"xai",model:"test-model"});
+  assert.match(result.error,/XAI_API_KEY.*не настроен/);
+  assert.match(result.error,/Sites/);
+  assert.equal(result.result,undefined);assert.equal(h.requests.length,0);
+  assert.equal(h.all("SELECT id FROM ai_runs").length,0);
+});
+
+test("AI connection diagnostic validates provider and model before generating",async t=>{
+  const h=harness(t);
+  for(const values of [
+    {provider:"forged",model:"test-model"},
+    {provider:"xai",model:""},
+    {provider:"xai",model:"https://attacker.invalid/model"},
+    {provider:"xai",model:"x".repeat(129)},
+  ])assert.ok((await h.invoke("testAiConnectionState",values)).error);
+  assert.equal(h.requests.length,0);
+});
+
+test("AI connection diagnostic tests the selected model with no task context or state changes",async t=>{
+  const h=harness(t);h.env.OPENAI_API_KEY="openai-test-only-secret";
+  h.human({body:"PRIVATE_MESSAGE_DO_NOT_SEND"});
+  const before={task:h.one("SELECT * FROM tasks WHERE id='ai-task'"),messages:h.all("SELECT * FROM task_messages"),bots:h.all("SELECT * FROM bot_configs")};
+  h.respond(async()=>({text:"UPSTREAM_TEXT_DO_NOT_RETURN",inputTokens:8,outputTokens:2}));
+  const result=await h.invoke("testAiConnectionState",{
+    provider:"openai",model:"  selected-test-model  ",system:"FORGED_PROMPT",taskId:"ai-task",apiKey:"FORGED_SECRET",messages:"FORGED_MESSAGES",
+  });
+  assert.equal(result.error,undefined);assert.equal(result.result.provider,"openai");assert.equal(result.result.model,"selected-test-model");
+  assert.ok(Number.isFinite(Date.parse(result.result.checkedAt)));
+  assert.equal(h.requests.length,1);
+  assert.deepEqual(h.requests[0],{
+    provider:"openai",model:"selected-test-model",apiKey:"openai-test-only-secret",
+    system:"Это проверка подключения. Ответь одним словом OK.",
+    messages:[{role:"user",content:"Проверка подключения."}],maxOutputTokens:512,
+  });
+  assert.doesNotMatch(JSON.stringify(result),/secret|UPSTREAM_TEXT|FORGED|PRIVATE_MESSAGE/);
+  assert.equal(h.all("SELECT id FROM ai_runs").length,0);
+  assert.deepEqual({task:h.one("SELECT * FROM tasks WHERE id='ai-task'"),messages:h.all("SELECT * FROM task_messages"),bots:h.all("SELECT * FROM bot_configs")},before);
+});
+
+test("AI connection diagnostic does not load tasks, messages or bot settings",async t=>{
+  const h=harness(t);let calls=0;
+  const diagnostic=h.ai.createAiEngine({
+    requireAccess:async()=>({role:"manager"}),
+    db:{prepare(){assert.fail("Diagnostic queried the database");}},
+    loadTree(){assert.fail("Diagnostic loaded task data");},
+    getMembers(){assert.fail("Diagnostic loaded bot settings");},
+    getApiKey:()=>"test-only-secret",
+    generate:async()=>{calls++;return {text:"OK",inputTokens:1,outputTokens:1};},
+    now:()=>new Date("2026-11-18T00:00:00.000Z"),
+  });
+  const result=await diagnostic.testAiConnection({provider:"xai",model:"test-model"});
+  assert.equal(result.checkedAt,"2026-11-18T00:00:00.000Z");assert.equal(calls,1);
+});
+
+test("AI connection diagnostic reports safe provider errors and permits an explicit retry",async t=>{
+  const h=harness(t);
+  h.respond(async()=>{throw new provider.AiProviderError("unauthorized");});
+  const denied=await h.invoke("testAiConnectionState",{provider:"xai",model:"test-model"});
+  assert.match(denied.error,/отклонил ключ или доступ/);assert.equal(denied.result,undefined);
+  h.respond(async()=>{throw new Error("Upstream key=test-only-not-a-real-secret raw-body");});
+  const failure=await h.invoke("testAiConnectionState",{provider:"xai",model:"test-model"});
+  assert.ok(failure.error);assert.doesNotMatch(JSON.stringify(failure),/test-only-not-a-real-secret|raw-body|Upstream/);
+  h.respond(async()=>({text:"OK",inputTokens:1,outputTokens:1}));
+  const retry=await h.invoke("testAiConnectionState",{provider:"xai",model:"test-model"});
+  assert.ok(retry.result);assert.equal(retry.error,undefined);assert.equal(h.requests.length,3);
+});

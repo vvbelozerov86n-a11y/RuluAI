@@ -86,7 +86,7 @@ async function fields(form: FormData) {
   if (participants.some(id => !memberIds.has(id))) throw new FormError("Состав команды изменился. Проверьте участников.");
   const size = str(form, "size");
   const theme = str(form, "theme");
-  if (!isBlockSize(size) || !isBlockTheme(theme)) throw new FormError("Выберите форму и цвет блока.");
+  if (!isBlockSize(size) || !isBlockTheme(theme)) throw new FormError("Выберите форму и цвет карточки задачи.");
   return { title, description, ownerId, participants, size, theme, dueDate: due.date, dueLabel: due.date ? dueLabelFromISO(due.date) : "Без срока" };
 }
 
@@ -148,7 +148,7 @@ const create: Operation = async form => {
   if (!path || !parent || parent.kind !== "group") throw new FormError("Добавлять подзадачи можно только внутрь группы.");
   if (parent.version !== parentVersion) throw new FormError(CONFLICT);
   if (path.length >= MAX_DEPTH) throw new FormError(`Можно создать до ${MAX_DEPTH} вложенных уровней.`);
-  if (countNodes(tree) >= MAX_NODES) throw new FormError(`Можно создать до ${MAX_NODES} блоков.`);
+  if (countNodes(tree) >= MAX_NODES) throw new FormError(`Можно создать до ${MAX_NODES} задач и групп.`);
   const f = await fields(form);
   const nested = form.get("nested") !== null;
   const id = `task-${crypto.randomUUID()}`;
@@ -161,13 +161,13 @@ const create: Operation = async form => {
       params: [id,parentId,nested ? "group" : "leaf",f.title,f.ownerId,nested ? null : "todo",f.dueLabel,f.dueDate,f.description,"",f.size,f.theme,parentId,...gate.params],
     }, ...participantWrites(id, f.participants, gate, false)],
   }));
-  return { id: parentId, message: nested ? "Группа создана — добавьте подзадачи." : "Задача создана." };
+  return { id, message: nested ? "Группа задач создана — добавьте подзадачи." : "Задача создана." };
 };
 
 const update: Operation = async form => {
   await access(form);
   const { node, version, tree } = await nodeFor(form);
-  if (node.id === ROOT_ID) throw new FormError("Корневой блок нельзя изменить.");
+  if (node.id === ROOT_ID) throw new FormError("Общую группу задач нельзя изменить.");
   const f = await fields(form);
   const db = getD1();
   const reassign = node.ownerId !== f.ownerId;
@@ -191,7 +191,7 @@ const update: Operation = async form => {
       }] : []),
     ],
   }));
-  return { id: node.id, message: "Блок обновлён." };
+  return { id: node.id, message: node.kind === "group" ? "Группа задач обновлена." : "Задача обновлена." };
 };
 
 export async function createTaskState(_previous: ActionState, form: FormData): Promise<ActionState> { return perform(form, create); }
@@ -218,7 +218,9 @@ export async function deleteTask(form: FormData): Promise<void> {
         params: [node.id,now,batchId,now,token,...gate.params],
       }],
     }));
-    return { id: path.at(-2)!.id, message: "Блок и его подзадачи перемещены в корзину. Их можно восстановить." };
+    return { id: path.at(-2)!.id, message: node.kind === "group"
+      ? "Группа и её задачи перемещены в корзину. Их можно восстановить."
+      : "Задача перемещена в корзину. Её можно восстановить." };
   });
 }
 
@@ -238,20 +240,20 @@ export async function restoreTask(form: FormData): Promise<void> {
     const id = taskId(form);
     const version = versionOf(form);
     const batchId = str(form, "batchId") || str(form, "deletionBatchId");
-    if (!/^delete-[a-zA-Z0-9-]+$/.test(batchId)) throw new FormError("Выберите удалённую ветку в корзине.");
+    if (!/^delete-[a-zA-Z0-9-]+$/.test(batchId)) throw new FormError("Выберите удалённую задачу или группу в корзине.");
     const db = getD1();
     const deleted = await db.prepare("SELECT parent_id AS parentId FROM tasks WHERE id=? AND version=? AND deleted_at IS NOT NULL AND deletion_batch_id=?").bind(id,version,batchId).first<{ parentId: string }>();
     if (!deleted) throw new FormError(CONFLICT);
     const tree = await loadTree();
     const parentPath = findPath(deleted.parentId, tree);
-    if (!parentPath || parentPath.at(-1)!.kind !== "group") throw new FormError("Сначала восстановите родительскую группу. Восстановление внутрь удалённого блока невозможно.");
+    if (!parentPath || parentPath.at(-1)!.kind !== "group") throw new FormError("Сначала восстановите родительскую группу. Восстановление внутрь удалённой группы невозможно.");
     const depth = await db.prepare(`WITH RECURSIVE branch(id,depth) AS (
       SELECT id,1 FROM tasks WHERE id=? AND deletion_batch_id=?
       UNION ALL SELECT t.id,b.depth+1 FROM tasks t JOIN branch b ON t.parent_id=b.id WHERE t.deletion_batch_id=?
     ) SELECT MAX(depth) AS depth FROM branch`).bind(id,batchId,batchId).first<{ depth: number }>();
     if (parentPath.length + Number(depth?.depth ?? 1) > MAX_DEPTH) throw new FormError(`Восстановление превысит ${MAX_DEPTH} уровней.`);
     const conflict = await taskScheduleConflict(db, { kind: "restore", batchId });
-    if (conflict) throw new FormError(`Нельзя восстановить ветку: ${conflict}`);
+    if (conflict) throw new FormError(`Нельзя восстановить задачу: ${conflict}`);
     const restored = await runMutation(db, {
       id,version,deleted:true,
       guard: scheduleVersionGuard(tree.version, { sql: `deletion_batch_id=? AND EXISTS (SELECT 1 FROM tasks p WHERE p.id=? AND p.kind='group' AND p.deleted_at IS NULL)
@@ -265,8 +267,8 @@ export async function restoreTask(form: FormData): Promise<void> {
         params: [new Date().toISOString(),token,batchId,...gate.params],
       }],
     });
-    if (!restored) throw new FormError("Не удалось восстановить: данные изменились, родитель удалён или превышен лимит блоков. Обновите корзину.");
-    return { id: deleted.parentId, message: "Ветка восстановлена вместе с подзадачами и участниками." };
+    if (!restored) throw new FormError("Не удалось восстановить: данные изменились, родительская группа удалена или превышен лимит задач. Обновите корзину.");
+    return { id: deleted.parentId, message: "Задача восстановлена вместе с подзадачами и участниками." };
   }, "/trash");
 }
 
@@ -289,7 +291,7 @@ export async function moveTask(form: FormData): Promise<void> {
         params:[node.position,new Date().toISOString(),token,neighbor.id,...gate.params],
       }],
     }));
-    return { id:parent.id,message:delta < 0 ? "Блок перемещён раньше." : "Блок перемещён позже." };
+    return { id:parent.id,message:delta < 0 ? "Задача перемещена раньше." : "Задача перемещена позже." };
   });
 }
 
@@ -297,8 +299,8 @@ export async function nestTask(form: FormData): Promise<void> {
   return ordinary(form, async form => {
     await access(form);
     const { node,path,tree,version } = await nodeFor(form);
-    if (node.kind !== "leaf") throw new FormError("Этот блок уже содержит подзадачи.");
-    if (path.length >= MAX_DEPTH || countNodes(tree) >= MAX_NODES) throw new FormError("Достигнут лимит блоков или вложенности.");
+    if (node.kind !== "leaf") throw new FormError("Это уже группа задач.");
+    if (path.length >= MAX_DEPTH || countNodes(tree) >= MAX_NODES) throw new FormError("Достигнут лимит задач или вложенности.");
     const childId = `step-${crypto.randomUUID()}`;
     await ensureChanged(await runMutation(getD1(), {
       id:node.id,version,
@@ -316,7 +318,7 @@ export async function nestTask(form: FormData): Promise<void> {
         params:[childId,node.id,...gate.params],
       }],
     }));
-    return {id:node.id,message:"Поручение преобразовано в группу. Пока внутри только исходная копия, разбиение можно отменить."};
+    return {id:node.id,message:"Задача преобразована в группу задач. Пока внутри только исходная копия, разбиение можно отменить."};
   });
 }
 
@@ -325,10 +327,10 @@ export async function unnestTask(form: FormData): Promise<void> {
     await access(form);
     const {node,version} = await nodeFor(form);
     const child = node.children[0];
-    if (node.kind !== "group" || node.children.length !== 1 || child.kind !== "leaf" || child.splitSourceId !== node.id) throw new FormError("Отмена доступна, только пока группа содержит одну исходную копию поручения.");
+    if (node.kind !== "group" || node.children.length !== 1 || child.kind !== "leaf" || child.splitSourceId !== node.id) throw new FormError("Отмена доступна, только пока группа содержит одну исходную копию задачи.");
     const sameParticipants = JSON.stringify([...new Set(node.participants)].sort()) === JSON.stringify([...new Set(child.participants)].sort());
     if (node.title !== child.title || node.ownerId !== child.ownerId || node.dueDate !== child.dueDate || node.description !== child.description || !sameParticipants) {
-      throw new FormError("Группа и исходное поручение уже изменены по-разному. Отмена недоступна, чтобы не потерять правки названия, описания или участников.");
+      throw new FormError("Группа и исходная задача уже изменены по-разному. Отмена недоступна, чтобы не потерять правки названия, описания или участников.");
     }
     const activity = await getD1().prepare(`SELECT
       (SELECT COUNT(*) FROM task_messages WHERE task_id=?) +
@@ -354,7 +356,7 @@ export async function unnestTask(form: FormData): Promise<void> {
         params:[now,batchId,now,token,child.id,...gate.params],
       }],
     }));
-    return {id:node.id,message:"Разбиение отменено. Содержание исходного поручения сохранено."};
+    return {id:node.id,message:"Разбиение отменено. Содержание исходной задачи сохранено."};
   });
 }
 

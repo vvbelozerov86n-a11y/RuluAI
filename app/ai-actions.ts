@@ -2,7 +2,7 @@
 
 import { redirect } from "next/navigation";
 import type { ActionState } from "../lib/ruli/action-state";
-import { aiErrorMessage, retryAiChat, runTaskAi, saveBot, type AiRunSummary } from "../lib/ruli/ai";
+import { aiErrorMessage, retryAiChat, runTaskAi, saveBot, testAiConnection, type AiConnectionState, type AiRunSummary } from "../lib/ruli/ai";
 
 function value(form: FormData, key: string): string {
   const item = form.get(key);
@@ -34,6 +34,16 @@ export async function saveBotState(_previous: ActionState, form: FormData): Prom
     });
   } catch (error) { return failure(form, error); }
   redirect(`/team?flash=${encodeURIComponent("Настройки AI-бота сохранены.")}`);
+}
+
+export async function testAiConnectionState(_previous: AiConnectionState, form: FormData): Promise<AiConnectionState> {
+  try {
+    return { result: await testAiConnection({ provider: value(form, "provider"), model: value(form, "model") }) };
+  } catch (error) {
+    if (error && typeof error === "object" && "digest" in error && String(error.digest).startsWith("NEXT_REDIRECT")) throw error;
+    // Unlike editable bot settings, diagnostics never echo submitted fields.
+    return { error: aiErrorMessage(error) };
+  }
 }
 
 export async function runTaskAiState(_previous: ActionState, form: FormData): Promise<ActionState> {

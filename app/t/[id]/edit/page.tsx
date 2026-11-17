@@ -4,7 +4,7 @@ import {getMembers,loadTree} from "@/lib/ruli/data";
 import {findPath,ROOT_ID,type ViewMode} from "@/lib/ruli/model";
 import {requireAccess,canManage} from "@/lib/ruli/access";
 export const dynamic="force-dynamic";
-export const metadata={title:"Настройка блока"};
+export const metadata={title:"Изменение задачи"};
 export default async function EditTaskPage({params,searchParams}:{params:Promise<{id:string}>;searchParams:Promise<Record<string,string|string[]|undefined>>}) {
   const viewer=await requireAccess();if(!canManage(viewer))redirect("/");
   const {id}=await params,query=await searchParams,mode:ViewMode=query.mode==="build"?"build":"view";

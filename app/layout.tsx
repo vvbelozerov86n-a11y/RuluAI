@@ -9,7 +9,7 @@ export const metadata: Metadata = {
     default: "Рули — задачи по уровням",
     template: "%s — Рули",
   },
-  description: "Задачи блоками: от крупных целей до поручений людям и Grok.",
+  description: "Задачи команды: от крупных целей до поручений людям и AI.",
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",
@@ -54,6 +54,7 @@ export default async function RootLayout({
           <div className="topbar-right">
             <span className="prototype-label">Рабочая версия</span>
             <Link className="team-button" href="/team" aria-label="Открыть команду">
+              <span className="team-button-label">Команда и AI</span>
               {user ? (
                 <span className="avatar small" title={user.email}>
                   {initialsOf(user.fullName || user.displayName)}

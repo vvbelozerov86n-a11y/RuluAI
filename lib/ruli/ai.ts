@@ -27,6 +27,9 @@ export type SaveBotInput = {
   memberId?: string; version: number; name: string; role: string;
   provider: string; model: string; systemPrompt: string; enabled: boolean;
 };
+export type AiConnectionInput = { provider: string; model: string };
+export type AiConnectionResult = { provider: AiProvider; model: string; checkedAt: string };
+export type AiConnectionState = { result?: AiConnectionResult; error?: string };
 export class AiError extends Error {}
 export function aiErrorMessage(error: unknown): string {
   return error instanceof AiError ? error.message : safeAiErrorMessage(error);
@@ -301,6 +304,27 @@ export function createAiEngine(deps: AiDependencies) {
     return { canManage: true as const, bots, providers: AI_PROVIDERS.map(provider => ({ ...provider, configured: Boolean(deps.getApiKey(provider.id)?.trim()) })) };
   }
 
+  async function testAiConnection(input: AiConnectionInput): Promise<AiConnectionResult> {
+    const viewer = await deps.requireAccess("/team");
+    if (!canManage(viewer)) throw new AiError("Проверить подключение может только руководитель.");
+    const provider = AI_PROVIDERS.find(item => item.id === input.provider);
+    if (!provider) throw new AiError("Выберите поддерживаемого AI-провайдера.");
+    const model = bounded(input.model, 128, "Модель", true).trim();
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/.test(model)) throw new AiError("Название модели содержит недопустимые символы.");
+    const apiKey = deps.getApiKey(provider.id)?.trim();
+    if (!apiKey) throw new AiError(`Ключ ${provider.keyName} не настроен. Добавьте секрет в настройках сайта Sites, опубликуйте обновление и повторите проверку.`);
+    // This diagnostic never loads task data, messages, bot instructions or members.
+    // The provider adapter bounds the request and sanitizes upstream errors.
+    await deps.generate({
+      provider: provider.id, model, apiKey,
+      system: "Это проверка подключения. Ответь одним словом OK.",
+      messages: [{ role: "user", content: "Проверка подключения." }],
+      maxOutputTokens: 512,
+    });
+    // Do not return the provider's text, credentials or request payload to the client.
+    return { provider: provider.id, model, checkedAt: now().toISOString() };
+  }
+
   async function loadTaskAi(node: TaskNode, _viewer: AccessContext, selectedChannel?: string | null) {
     const viewer = await deps.requireAccess(`/t/${node.id}`);
     const current = findPath(node.id, await deps.loadTree())?.at(-1);
@@ -359,7 +383,7 @@ export function createAiEngine(deps: AiDependencies) {
     return { memberId };
   }
 
-  return { validateAiReply, requestAiReply, retryAiChat, runTaskAi, loadBotSettings, loadTaskAi, saveBot };
+  return { validateAiReply, requestAiReply, retryAiChat, runTaskAi, loadBotSettings, loadTaskAi, saveBot, testAiConnection };
 }
 
 function engine() {
@@ -378,3 +402,4 @@ export async function runTaskAi(input: AiTaskRequest) { return engine().runTaskA
 export async function loadBotSettings() { return engine().loadBotSettings(); }
 export async function loadTaskAi(node: TaskNode, viewer: AccessContext, channel?: string | null) { return engine().loadTaskAi(node, viewer, channel); }
 export async function saveBot(input: SaveBotInput) { return engine().saveBot(input); }
+export async function testAiConnection(input: AiConnectionInput) { return engine().testAiConnection(input); }
