@@ -6,6 +6,7 @@
   <meta name="description" content="Задачи блоками: от крупных целей до поручений людям и Grok.">
   <title>Рули — задачи по уровням</title>
   <link rel="stylesheet" href="hierarchy.css">
+  <link rel="stylesheet" href="builder.css">
 </head>
 <body>
   <header class="topbar">
@@ -16,10 +17,11 @@
   <main class="workspace">
     <div class="navigation-row"><button id="backButton" class="back-button" aria-label="На уровень выше"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6-6 6 6 6"/></svg></button><nav id="breadcrumbs" aria-label="Путь задачи"></nav><span id="depth" class="depth"></span></div>
     <div id="content"></div>
-    <footer class="workspace-footer"><span><i class="quiet-dot"></i>Демо-данные · изменения только до обновления страницы</span><span id="footerHint">Нажмите на блок, чтобы увидеть подзадачи <span aria-hidden="true">↘</span></span></footer>
+    <footer class="workspace-footer"><span id="saveHint"><i class="quiet-dot"></i>Черновик сохраняется в этом браузере</span><span id="footerHint">Нажмите на блок, чтобы увидеть подзадачи <span aria-hidden="true">↘</span></span></footer>
   </main>
   <dialog id="dialog"></dialog>
   <div id="toast" role="status" aria-live="polite"></div>
   <script src="hierarchy.js"></script>
+  <script src="builder.js"></script>
 </body>
 </html>
