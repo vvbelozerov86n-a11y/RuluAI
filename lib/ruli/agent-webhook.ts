@@ -1,4 +1,5 @@
 /** Исходящие события для внешних агентов Grok Bot. Без импортов Workers. */
+import { taskHasPrivateChannel } from "./agent-channels.ts";
 
 export const WEBHOOK_TIMEOUT_MS = 10_000;
 export const AGENT_PROVIDER = "grok-bot";
@@ -165,14 +166,24 @@ export function planTaskEvents(previous: TaskSnapshot | null, next: TaskSnapshot
   return [...assigned, ...updated];
 }
 
-export function planMessageEvents(task: TaskSnapshot, message: MessageSnapshot, agents: AgentRef[]): { agent: AgentRef; event: AgentEventType }[] {
-  const assigned = assignedAgents(task, agents).filter(agent => agent.memberId !== message.authorId);
+export function planMessageEvents(
+  task: TaskSnapshot,
+  message: MessageSnapshot,
+  agents: AgentRef[],
+  privateChannelVerified = false,
+): { agent: AgentRef; event: AgentEventType }[] {
+  // A mention never changes the audience of a private conversation. The
+  // verified group channel may belong to a participant of an active child.
+  const eligible = message.channelMemberId && privateChannelVerified
+    ? agents.filter(agent => agent.enabled && SLUG.test(agent.slug))
+    : assignedAgents(task, agents);
+  const assigned = eligible.filter(agent => agent.memberId !== message.authorId
+    && (!message.channelMemberId || agent.memberId === message.channelMemberId));
   const mentioned = mentionedAgents(message.text, assigned);
   const mentionedIds = new Set(mentioned.map(agent => agent.memberId));
   const events: { agent: AgentRef; event: AgentEventType }[] = mentioned.map(agent => ({ agent, event: "bot.mentioned" }));
   for (const agent of assigned) {
     if (mentionedIds.has(agent.memberId)) continue;
-    if (message.channelMemberId && message.channelMemberId !== agent.memberId) continue;
     events.push({ agent, event: "message.created" });
   }
   return events;
@@ -230,7 +241,10 @@ async function defaultLoadMembers(db: D1Database) {
 export async function loadTaskOutbox(db: D1Database, taskId: string): Promise<OutboxRow[]> {
   const result = await db.prepare(`SELECT id,event,task_id AS taskId,bot_member_id AS botMemberId,bot_slug AS botSlug,
     payload,status,attempts,last_error AS lastError,created_at AS createdAt,updated_at AS updatedAt
-    FROM bot_webhook_outbox WHERE task_id=? ORDER BY created_at DESC,id DESC LIMIT 20`).bind(taskId).all<OutboxRow>();
+    FROM bot_webhook_outbox WHERE task_id=? AND (status IN ('pending','failed') OR id IN (
+      SELECT id FROM bot_webhook_outbox WHERE task_id=? AND status='delivered'
+      ORDER BY created_at DESC,id DESC LIMIT 20
+    )) ORDER BY created_at DESC,id DESC`).bind(taskId, taskId).all<OutboxRow>();
   return result.results;
 }
 
@@ -326,14 +340,47 @@ export async function notifyGrokBotMessage(
 ): Promise<OutboxRow[]> {
   if (!webhookConfigured(deps.config)) return [];
   const agents = await (deps.loadAgents ?? (() => defaultLoadAgents(deps.db)))();
-  const planned = planMessageEvents(task, message, agents);
+  const privateChannelVerified = Boolean(message.channelMemberId
+    && await taskHasPrivateChannel(deps.db, task.id, message.channelMemberId));
+  if (message.channelMemberId && !privateChannelVerified) return [];
+  const planned = planMessageEvents(task, message, agents, privateChannelVerified);
   return insertAndSchedule(deps, planned.map(item => ({ ...item, task, message })));
 }
 
-export async function retryOutboxEvent(deps: AgentWebhookDependencies, eventId: string): Promise<OutboxRow | null> {
+async function retryRecipientAvailable(deps: AgentWebhookDependencies, row: OutboxRow): Promise<boolean> {
+  const agents = await (deps.loadAgents ?? (() => defaultLoadAgents(deps.db)))();
+  if (!agents.some(agent => agent.enabled && agent.memberId === row.botMemberId && agent.slug === row.botSlug)) return false;
+  if (!await taskHasPrivateChannel(deps.db, row.taskId, row.botMemberId)) return false;
+  const task = await deps.db.prepare("SELECT owner_id AS ownerId FROM tasks WHERE id=? AND deleted_at IS NULL")
+    .bind(row.taskId).first<{ ownerId: string }>();
+  if (!task) return false;
+  const direct = task.ownerId === row.botMemberId || Boolean(await deps.db.prepare(
+    "SELECT 1 AS assigned FROM task_participants WHERE task_id=? AND member_id=?",
+  ).bind(row.taskId, row.botMemberId).first());
+  if (row.event === "task.assigned" || row.event === "task.updated") return direct;
+  // Resolve the original channel from the durable message, not from a caller
+  // or an old payload. Reassignment must not resend a historical private text.
+  let messageId: unknown;
+  try { messageId = (JSON.parse(row.payload) as WebhookPayload).message?.id; }
+  catch { return false; }
+  if (typeof messageId !== "string") return false;
+  const message = await deps.db.prepare("SELECT channel_member_id AS channelMemberId FROM task_messages WHERE id=? AND task_id=?")
+    .bind(messageId, row.taskId).first<{ channelMemberId: string | null }>();
+  return Boolean(message && (message.channelMemberId === null ? direct : message.channelMemberId === row.botMemberId));
+}
+
+export async function retryOutboxEvent(deps: AgentWebhookDependencies, eventId: string, expectedTaskId?: string): Promise<OutboxRow | null> {
   const row = await deps.db.prepare(`SELECT id,event,task_id AS taskId,bot_member_id AS botMemberId,bot_slug AS botSlug,
     payload,status,attempts,last_error AS lastError,created_at AS createdAt,updated_at AS updatedAt
     FROM bot_webhook_outbox WHERE id=?`).bind(eventId).first<OutboxRow>();
   if (!row) return null;
+  if (expectedTaskId && row.taskId !== expectedTaskId) return null;
+  if (!await retryRecipientAvailable(deps, row)) {
+    const lastError = "Событие больше недоступно: задача или личный канал удалены, агент выключен либо его назначение изменилось.";
+    const updatedAt = (deps.now ?? (() => new Date()))().toISOString();
+    await deps.db.prepare("UPDATE bot_webhook_outbox SET status='failed',last_error=?,updated_at=? WHERE id=?")
+      .bind(lastError, updatedAt, row.id).run();
+    return { ...row, status: "failed", lastError, updatedAt };
+  }
   return deliverOutboxRow(deps.db, row, deps.config, deps.fetch ?? fetch, deps.now ?? (() => new Date()));
 }

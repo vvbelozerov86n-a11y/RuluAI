@@ -1,0 +1,1 @@
+ALTER TABLE `bot_api_idempotency` ADD `request_hash` text;

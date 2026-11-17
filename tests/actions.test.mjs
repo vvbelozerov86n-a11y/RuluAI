@@ -30,7 +30,7 @@ function harness() {
     ('task','group','leaf','Поручение','anna','todo',0,'Исходное описание',''),
     ('neighbor','group','leaf','Сосед','max','doing',1,'','');
     INSERT INTO task_participants(task_id,member_id) VALUES ('task','max');`);
-  const h = { sqlite, ctx: manager, beforeBatch: null, failAt: -1, accessCalls: 0 };
+  const h = { sqlite, ctx: manager, beforeBatch: null, failAt: -1, accessCalls: 0, retryCalls: [], retryRow: null };
   const prepare = sql => {
     const statement = { sql, params: [] };
     return {
@@ -81,7 +81,7 @@ function harness() {
     "../lib/ruli/model": model,
     "../lib/ruli/mutations": mutations,
     "../lib/ruli/task-schedule": taskSchedule,
-    "../lib/ruli/agent-runtime": { notifyTaskChangeForAgents: async () => {}, retryAgentDelivery: async () => null, listTaskDeliveries: async () => [], agentWebhookConfigured: () => false },
+    "../lib/ruli/agent-runtime": { notifyTaskChangeForAgents: async () => {}, retryAgentDelivery: async (_db, eventId, expectedTaskId) => { h.retryCalls.push({ eventId, expectedTaskId }); return h.retryRow; }, listTaskDeliveries: async () => [], agentWebhookConfigured: () => false },
   };
   const exports = {};
   vm.runInNewContext(source, { exports, require(name) { if (!(name in modules)) throw new Error(`Unexpected import ${name}`); return modules[name]; }, FormData, URLSearchParams, crypto, console: { error() {} } });
@@ -109,6 +109,17 @@ async function success(promise) {
 async function rejectedAction(promise, pattern) {
   await assert.rejects(promise, error => error.digest === "NEXT_REDIRECT" && pattern.test(new URL(error.url,"https://local").searchParams.get("error") ?? ""));
 }
+
+test("webhook retry is manager-only and passes the selected task before delivery", async () => {
+  const h = harness();
+  h.retryRow = { id: "event-qa", taskId: "task", status: "delivered" };
+  await success(h.actions.retryBotWebhook(h.form({ eventId: "event-qa" })));
+  assert.deepEqual(h.retryCalls.map(row => ({ ...row })), [{ eventId: "event-qa", expectedTaskId: "task" }]);
+  h.retryCalls.length = 0;
+  h.ctx = { ...manager, role: "executor" };
+  await rejectedAction(h.actions.retryBotWebhook(h.form({ eventId: "event-qa" })), /руководителю/);
+  assert.equal(h.retryCalls.length, 0);
+});
 
 test("creating opens the new task and saves description, deadline and participants in one batch", async () => {
   const h = harness();

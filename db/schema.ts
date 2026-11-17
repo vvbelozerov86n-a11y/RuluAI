@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 /**
  * Рули — иерархические задачи команды людей и AI-ботов.
@@ -140,7 +140,8 @@ export const botApiIdempotency = sqliteTable("bot_api_idempotency", {
   status: integer("status").notNull(),
   body: text("body").notNull(),
   createdAt: text("created_at").notNull(),
-}, t => [uniqueIndex("bot_api_idempotency_pk").on(t.botMemberId, t.idempotencyKey)]);
+  requestHash: text("request_hash"),
+}, t => [primaryKey({ columns: [t.botMemberId, t.idempotencyKey] })]);
 
 /** A logical request is deduplicated across retries. Leases fence old workers. */
 export const aiRuns = sqliteTable("ai_runs", {

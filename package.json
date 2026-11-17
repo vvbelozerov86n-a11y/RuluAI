@@ -13,7 +13,7 @@
     "build:designs": "node build.cjs",
     "start": "node scripts/start-worker.mjs",
     "preview:designs": "node preview.cjs --dist",
-    "test": "node --test tests/model.test.cjs tests/ruli-model.test.mjs tests/scheduling.test.mjs tests/actions.test.mjs tests/collaboration.test.mjs tests/ui-state.test.mjs tests/ai-provider.test.mjs tests/ai.test.mjs tests/task-search.test.mjs tests/return-path.test.mjs tests/agent-webhook.test.mjs tests/bot-api.test.mjs",
+    "test": "node --test tests/model.test.cjs tests/ruli-model.test.mjs tests/scheduling.test.mjs tests/actions.test.mjs tests/collaboration.test.mjs tests/ui-state.test.mjs tests/ai-provider.test.mjs tests/ai.test.mjs tests/task-search.test.mjs tests/return-path.test.mjs tests/agent-webhook.test.mjs tests/bot-api.test.mjs tests/migrations.test.mjs tests/agent-ui.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate"
   },

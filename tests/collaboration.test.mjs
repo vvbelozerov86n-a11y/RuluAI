@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import * as policy from "../lib/ruli/policy.ts";
-import { barrier, collaborationHarness, plain, redirectMessage, TestRedirect } from "./collaboration-helper.mjs";
+import { notifyGrokBotMessage } from "../lib/ruli/agent-webhook.ts";
+import { barrier, collaborationHarness, loadModule, makeForm, plain, redirectMessage, TestRedirect } from "./collaboration-helper.mjs";
 
 function fixture(t) { const h = collaborationHarness(); t.after(() => h.close()); return h; }
 const message = (overrides = {}) => ({ taskId: "launch", channelMemberId: "", body: "Готовим письмо", clientId: "message-id-0001", ...overrides });
@@ -99,6 +100,39 @@ test("message state acknowledges the exact client token without redirect and ret
   assert.ok(changed.state.error);
   const ordinary = await h.invoke("sendMessage", message({ clientId: "ordinary-send-001" }));
   assert.equal(redirectMessage(ordinary, "flash"), "Сообщение отправлено");
+});
+
+test("sending in a group's private agent channel delivers once without notifying another mentioned agent", async t => {
+  const h = fixture(t);
+  h.seedTask("analyst-child", { parentId: "launch", ownerId: "analyst" });
+  h.seedTask("writer-child", { parentId: "launch", ownerId: "writer" });
+  for (const memberId of ["analyst", "writer"]) h.sqlite.prepare(`INSERT INTO bot_configs
+    (member_id,provider,model,system_prompt,slug,enabled,version,updated_at)
+    VALUES (?,'grok-bot','-','',?,1,1,'2026-11-18')`).run(memberId, memberId);
+  const sent = [];
+  const actions = loadModule("app/collaboration-actions.ts", {
+    ...h.common, ...h.collaboration,
+    notifyMessageForAgents: (db, task, entry) => notifyGrokBotMessage({
+      db, config: { url: "https://hooks.example/synthetic" },
+      fetch: async (_url, init) => { sent.push(JSON.parse(init.body)); return new Response(null, { status: 204 }); },
+    }, task, entry),
+  }, ["sendMessageState"]);
+  const form = makeForm(message({ channelMemberId: "analyst", body: "Private @writer", clientId: "private-group-agent-01" }));
+  const state = await actions.sendMessageState({}, form);
+  assert.deepEqual(plain(state), { sentClientId: "private-group-agent-01" });
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].bot.slug, "analyst");
+  assert.equal(sent[0].task.id, "launch");
+  assert.equal(sent[0].message.text, "Private @writer");
+  assert.equal(h.one("SELECT channel_member_id FROM task_messages").channel_member_id, "analyst");
+  assert.equal(h.one("SELECT status FROM bot_webhook_outbox").status, "delivered");
+  await actions.sendMessageState({}, form);
+  assert.equal(sent.length, 1);
+  assert.equal(h.one("SELECT COUNT(*) AS count FROM task_messages").count, 1);
+  h.sqlite.prepare("UPDATE tasks SET owner_id='anna' WHERE id='analyst-child'").run();
+  const revoked = await actions.sendMessageState({}, makeForm(message({ channelMemberId: "analyst", clientId: "private-group-revoked-01" })));
+  assert.match(revoked.error, /нет доступа/);
+  assert.equal(sent.length, 1);
 });
 
 test("generate and update schedule actions deny non-managers before writes", async (t) => {

@@ -86,6 +86,6 @@ export async function listTaskDeliveries(db: D1Database, taskId: string): Promis
   return loadTaskOutbox(db, taskId);
 }
 
-export async function retryAgentDelivery(db: D1Database, eventId: string): Promise<OutboxRow | null> {
-  return retryOutboxEvent(agentWebhookDeps(db), eventId);
+export async function retryAgentDelivery(db: D1Database, eventId: string, expectedTaskId?: string): Promise<OutboxRow | null> {
+  return retryOutboxEvent(agentWebhookDeps(db), eventId, expectedTaskId);
 }

@@ -14,7 +14,10 @@ export function MessageComposer({taskId,channelMemberId="",viewerUserId,clientId
   const [state,action,pending]=useActionState<ActionState,FormData>(sendMessageState,{});
   const [selectedBot,setSelectedBot]=useState("");
   const [submittedBot,setSubmittedBot]=useState("");
-  const bot=privateBot??(!channelMemberId?bots.find(item=>item.memberId===selectedBot):undefined);
+  const modelBots=bots.filter(item=>item.kind!=="agent");
+  const bot=privateBot??(!channelMemberId?modelBots.find(item=>item.memberId===selectedBot):undefined);
+  const external=bot?.kind==="agent";
+  const generalAgents=!channelMemberId&&bots.some(item=>item.kind==="agent");
   const storageKey=draftStorageKey({viewerUserId,taskId,channelMemberId});
   const store=useMemo(()=>getDraftStore(storageKey,clientId),[storageKey,clientId]);
   const {draft,persistent}=useSyncExternalStore(store.subscribe,store.getSnapshot,store.getServerSnapshot);
@@ -35,18 +38,19 @@ export function MessageComposer({taskId,channelMemberId="",viewerUserId,clientId
     <input type="hidden" name="channelMemberId" value={channelMemberId}/>
     <input type="hidden" name="clientId" value={draft.clientId}/>
     <input type="hidden" name="mode" value={mode}/>
-    {privateBot?<input type="hidden" name="botMemberId" value={privateBot.memberId}/>:!channelMemberId&&bots.length?<label className="chat-bot-select">Попросить AI ответить<select name="botMemberId" value={selectedBot} disabled={pending} onChange={event=>setSelectedBot(event.target.value)}><option value="">Без AI — сообщение команде</option>{bots.map(item=><option key={item.memberId} value={item.memberId} disabled={!item.ready}>{item.name}{!item.enabled?" · выключен":!item.configured?" · нужен ключ":""}</option>)}</select></label>:null}
-    {bot?<p className="channel-note">{bot.ready?`Сообщение и контекст этого чата будут переданы ${bot.provider==="xai"?"xAI · Grok":"OpenAI"} (${bot.model}). Ответит ${bot.name}.`:bot.disabledReason}</p>:null}
+    {privateBot?<input type="hidden" name="botMemberId" value={privateBot.memberId}/>:!channelMemberId&&modelBots.length?<label className="chat-bot-select">Попросить AI ответить<select name="botMemberId" value={selectedBot} disabled={pending} onChange={event=>setSelectedBot(event.target.value)}><option value="">Сообщение команде</option>{modelBots.map(item=><option key={item.memberId} value={item.memberId} disabled={!item.ready}>{item.name}{!item.enabled?" · выключен":!item.configured?" · нужен ключ":""}</option>)}</select></label>:null}
+    {generalAgents?<p className="channel-note">Сообщения общего чата автоматически передаются включённым внешним агентам, назначенным непосредственно на эту задачу. Для обращения к одному агенту откройте его личный чат.{modelBots.length?" Выбор AI-бота выше не ограничивает этих получателей.":""}</p>:null}
+    {bot?<p className="channel-note">{!bot.ready?bot.disabledReason:external?`Сообщение будет передано внешнему агенту ${bot.name} (Grok Bot) через вебхук. Ответ появится в этом чате после обработки агентом.`:`Сообщение и контекст этого чата будут переданы ${bot.provider==="xai"?"xAI · Grok":"OpenAI"} (${bot.model}). Ответит ${bot.name}.`}</p>:null}
     <label htmlFor="message-body">Сообщение</label>
     <textarea id="message-body" name="body" rows={3} required maxLength={5000}
       value={draft.body} disabled={pending} onChange={event=>store.edit(event.target.value)}
       placeholder="Напишите вопрос или зафиксируйте решение"/>
     {state.error?<p className="form-error" role="alert">{state.error} Сообщение остаётся в форме.</p>:null}
-    {state.sentClientId&&!state.error?<p className="feed-status" role="status">Сообщение отправлено.</p>:null}
-    {pending&&bot?<p className="ai-run-status" role="status">Ожидаем ответ AI. Обычно это занимает до 45 секунд.</p>:null}
+    {state.sentClientId&&!state.error?<p className="feed-status" role="status">{external?"Сообщение сохранено в чате. Доставка агенту и его ответ выполняются отдельно.":"Сообщение отправлено."}</p>:null}
+    {pending&&bot?<p className="ai-run-status" role="status">{external?"Сохраняем сообщение для передачи внешнему агенту…":"Ожидаем ответ AI. Обычно это занимает до 45 секунд."}</p>:null}
     {state.notice?<p className={state.aiStatus==="failed"?"form-error":"feed-status"} role={state.aiStatus==="failed"?"alert":"status"}>{state.notice}</p>:null}
     {!persistent?<p className="form-error" role="status">Браузер не разрешил сохранить черновик. Скопируйте текст перед обновлением страницы.</p>:null}
-    <div className="detail-actions"><SubmitButton disabled={Boolean(privateBot&&!privateBot.ready)} pendingLabel={bot?"Отправляем и ждём AI…":"Отправляем…"}>Отправить</SubmitButton><span className="detail-note">Черновик сохраняется в этой вкладке · до 5 000 символов</span></div>
-  </form>{state.aiStatus==="failed"&&state.aiRunId&&submittedBot?<AiChatRetry taskId={taskId} clientId={clientId} key={state.aiRunId} run={{id:state.aiRunId,botMemberId:submittedBot,channelMemberId:channelMemberId||null,inputMessageId:null,error:null}}/>:null}</>;
+    <div className="detail-actions"><SubmitButton disabled={Boolean(privateBot&&!privateBot.ready)} pendingLabel={bot&&!external?"Отправляем и ждём AI…":"Отправляем…"}>Отправить</SubmitButton><span className="detail-note">Черновик сохраняется в этой вкладке · до 5 000 символов</span></div>
+  </form>{!external&&state.aiStatus==="failed"&&state.aiRunId&&submittedBot?<AiChatRetry taskId={taskId} clientId={clientId} key={state.aiRunId} run={{id:state.aiRunId,botMemberId:submittedBot,channelMemberId:channelMemberId||null,inputMessageId:null,error:null}}/>:null}</>;
 }
 

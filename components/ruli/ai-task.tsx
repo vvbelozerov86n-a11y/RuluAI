@@ -39,6 +39,12 @@ export function AiRunHistory({runs}:{runs:AiRunSummary[]}) {
 export function TaskAiPanel({taskId,version,data,manager,clientId}:{taskId:string;version:number;data:TaskAiData;manager:boolean;clientId:string}) {
   const {bot}=data;
   if(!bot)return null;
+  if(bot.kind==="agent")return <section className="task-ai" aria-labelledby="task-ai-title">
+    <h3 id="task-ai-title">Внешний агент</h3><p><strong>{bot.name}</strong> · Grok Bot{bot.slug?` · ${bot.slug}`:""}</p>
+    <p>Поручение передаётся агенту через вебхук. Его сообщения появятся в чате, а готовый результат — на проверке у руководителя. Время выполнения зависит от агента.</p>
+    {!bot.ready?<p className={`ai-connection ${bot.enabled?"missing":"disabled"}`}>{bot.disabledReason}{manager?<> <a href="/team#ai-settings-title">Настроить бота</a></>:null}</p>:<p className="ai-connection">Вебхук настроен. Успешная доставка подтверждает получение поручения. Дождитесь результата от агента.</p>}
+    <AiRunHistory runs={data.runs}/>
+  </section>;
   const active=data.runs.some(run=>run.status==="pending");
   return <section className="task-ai" aria-labelledby="task-ai-title"><h3 id="task-ai-title">Выполнить с AI</h3><p><strong>{bot.name}</strong> · {bot.provider==="xai"?"xAI · Grok":"OpenAI"} · {bot.model}</p><p>Название, описание и общая переписка задачи будут переданы выбранному AI-провайдеру. Ответ появится в результате со статусом «На проверке». Только руководитель принимает работу.</p>
     {data.disabledReason?<p className="ai-connection">{data.disabledReason}{manager&&!bot.ready?<> <a href="/team#ai-settings-title">Настроить бота</a></>:null}</p>:null}

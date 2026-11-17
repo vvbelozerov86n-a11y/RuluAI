@@ -4,7 +4,7 @@ import http from "node:http";
 import fs from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import {
-  buildPayload, mentionedAgents, notifyGrokBotTaskChange,
+  buildPayload, loadTaskOutbox, mentionedAgents, notifyGrokBotTaskChange, notifyGrokBotMessage,
   planMessageEvents, planTaskEvents, retryOutboxEvent, taskUrl, webhookAuthHeader, webhookConfigured,
 } from "../lib/ruli/agent-webhook.ts";
 
@@ -102,6 +102,50 @@ test("mentions, participants and anti-cycle shape message events", () => {
   assert.deepEqual(mentionedAgents("@Дзен, проверь", [vk, dzen]).map(item => item.slug), ["dzen"]);
 });
 
+test("private mentions never forward text to another bot or a human channel's bots", () => {
+  const involved = task({ ownerId: "me", participants: ["bot-vk", "bot-dzen"] });
+  const message = { id: "private-mention", authorId: "me", authorName: "Manager", authorKind: "human", text: "Private @vk @dzen", channelMemberId: "bot-dzen" };
+  assert.deepEqual(planMessageEvents(involved, message, [vk, dzen]).map(item => [item.agent.slug, item.event]), [["dzen", "bot.mentioned"]]);
+  assert.deepEqual(planMessageEvents(involved, { ...message, channelMemberId: "human" }, [vk, dzen]), []);
+  assert.deepEqual(planMessageEvents(involved, { ...message, authorId: "bot-dzen", authorKind: "bot" }, [vk, dzen]), []);
+});
+
+test("a group private channel reaches its active descendant agent without expanding the general audience", async t => {
+  const { db, sqlite } = memory(); t.after(() => sqlite.close());
+  const sent = [];
+  const deps = { db, config: { url: "https://hooks.example/synthetic" }, fetch: async (_url, init) => {
+    sent.push(JSON.parse(init.body)); return new Response(null, { status: 204 });
+  } };
+  const group = task({ id: "root", ownerId: "me", parentId: null, status: null, participants: [] });
+  const message = { id: "group-private", authorId: "me", authorName: "Manager", authorKind: "human", text: "Private @dzen", channelMemberId: "bot-vk" };
+  const rows = await notifyGrokBotMessage(deps, group, message);
+  assert.equal(rows.length, 1);
+  assert.equal(sent[0].bot.slug, "vk");
+  assert.equal(sent[0].task.id, "root");
+  assert.equal(sent[0].message.text, message.text);
+  assert.deepEqual(await notifyGrokBotMessage(deps, group, { ...message, channelMemberId: null }), []);
+  sqlite.prepare("UPDATE tasks SET deleted_at='2026-11-18' WHERE id='task-1'").run();
+  assert.deepEqual(await notifyGrokBotMessage(deps, group, message), []);
+  assert.equal(sent.length, 1);
+});
+
+test("delivery history retains every unresolved event behind newer successes", async t => {
+  const { db, sqlite } = memory(); t.after(() => sqlite.close());
+  const insert = sqlite.prepare(`INSERT INTO bot_webhook_outbox
+    (id,event,task_id,bot_member_id,bot_slug,payload,status,attempts,created_at,updated_at)
+    VALUES (?,'task.assigned',?,'bot-vk','vk','{}',?,0,?,?)`);
+  for (let index = 0; index < 25; index++) {
+    const stamp = `2026-11-18T01:${String(index).padStart(2, "0")}:00.000Z`;
+    insert.run(`ok-${index}`, "task-1", "delivered", stamp, stamp);
+  }
+  for (const status of ["pending", "failed"]) insert.run(status, "task-1", status, "2026-11-17", "2026-11-17");
+  insert.run("other-failed", "root", "failed", "2026-11-17", "2026-11-17");
+  const rows = await loadTaskOutbox(db, "task-1");
+  assert.equal(rows.filter(row => row.status === "delivered").length, 20);
+  assert.deepEqual(rows.filter(row => row.status !== "delivered").map(row => row.id).sort(), ["failed", "pending"]);
+  assert.ok(rows.every(row => row.taskId === "task-1"));
+});
+
 test("does not enqueue or send when the webhook URL is missing", async () => {
   const { db, sqlite } = memory();
   const rows = await notifyGrokBotTaskChange({ db, config: { baseUrl: "https://ruli.example" }, schedule: work => work }, null, task());
@@ -145,6 +189,81 @@ test("delivery failure is recorded and can be retried", async () => {
   const retried = await retryOutboxEvent({ db, config, fetch: fetcher }, "evt-fail");
   assert.equal(retried.status, "delivered");
   assert.equal(calls, 2);
+});
+
+test("retry refuses another task before sending or changing its event", async t => {
+  const { db, sqlite } = memory(); t.after(() => sqlite.close());
+  let calls = 0;
+  const deps = { db, config: { url: "https://hooks.example/synthetic" }, uuid: () => "retry-task-guard", fetch: async () => {
+    calls++; return new Response(null, { status: 503 });
+  } };
+  await notifyGrokBotTaskChange(deps, null, task());
+  const before = { ...sqlite.prepare("SELECT * FROM bot_webhook_outbox").get() };
+  assert.equal(await retryOutboxEvent(deps, "retry-task-guard", "different-task"), null);
+  assert.equal(calls, 1);
+  assert.deepEqual({ ...sqlite.prepare("SELECT * FROM bot_webhook_outbox").get() }, before);
+});
+
+test("retry refuses deleted tasks, deleted ancestors, revoked assignments and renamed or disabled agents", async t => {
+  for (const change of [
+    "UPDATE tasks SET deleted_at='2026-11-18' WHERE id='task-1'",
+    "UPDATE tasks SET deleted_at='2026-11-18' WHERE id='root'",
+    "UPDATE tasks SET owner_id='me' WHERE id='task-1'",
+    "UPDATE bot_configs SET enabled=0 WHERE member_id='bot-vk'",
+    "UPDATE bot_configs SET slug='renamed' WHERE member_id='bot-vk'",
+  ]) {
+    const { db, sqlite } = memory(); t.after(() => sqlite.close());
+    let calls = 0;
+    const deps = { db, config: { url: "https://hooks.example/synthetic" }, uuid: () => "retry-revoked", fetch: async () => {
+      calls++; return new Response(null, { status: 503 });
+    } };
+    await notifyGrokBotTaskChange(deps, null, task());
+    const originalPayload = sqlite.prepare("SELECT payload FROM bot_webhook_outbox").get().payload;
+    sqlite.exec(change);
+    const result = await retryOutboxEvent(deps, "retry-revoked", "task-1");
+    assert.equal(calls, 1, change);
+    assert.equal(result.status, "failed", change);
+    assert.match(result.lastError, /больше недоступно/, change);
+    assert.equal(result.attempts, 1, change);
+    assert.equal(result.payload, originalPayload, change);
+  }
+});
+
+test("private group retries preserve the payload but stop when its recipient loses the channel", async t => {
+  const { db, sqlite } = memory(); t.after(() => sqlite.close());
+  sqlite.prepare(`INSERT INTO task_messages
+    (id,task_id,channel_member_id,author_id,author_user_id,author_name,body,client_id,created_at)
+    VALUES ('private-source','root','bot-vk','me','manager','Manager','private','private-client','2026-11-18')`).run();
+  const sent = [];
+  const deps = { db, config: { url: "https://hooks.example/synthetic" }, uuid: () => "private-event", fetch: async (_url, init) => {
+    sent.push(init.body); return new Response(null, { status: sent.length === 1 ? 503 : 204 });
+  } };
+  await notifyGrokBotMessage(deps, task({ id: "root", ownerId: "me", parentId: null, status: null }), {
+    id: "private-source", authorId: "me", authorName: "Manager", authorKind: "human", text: "private", channelMemberId: "bot-vk",
+  });
+  assert.equal((await retryOutboxEvent(deps, "private-event", "root")).status, "delivered");
+  assert.equal(sent[1], sent[0]);
+  sqlite.prepare("UPDATE tasks SET owner_id='me' WHERE id='task-1'").run();
+  assert.match((await retryOutboxEvent(deps, "private-event", "root")).lastError, /больше недоступно/);
+  assert.equal(sent.length, 2);
+});
+
+test("retry blocks a historical private mention event addressed to a different bot", async t => {
+  const { db, sqlite } = memory(); t.after(() => sqlite.close());
+  sqlite.prepare("INSERT INTO task_participants(task_id,member_id) VALUES('task-1','bot-dzen')").run();
+  sqlite.prepare(`INSERT INTO task_messages
+    (id,task_id,channel_member_id,author_id,author_user_id,author_name,body,client_id,created_at)
+    VALUES ('private-source','task-1','bot-vk','me','manager','Manager','private @dzen','private-client','2026-11-18')`).run();
+  sqlite.prepare(`INSERT INTO bot_webhook_outbox
+    (id,event,task_id,bot_member_id,bot_slug,payload,status,attempts,created_at,updated_at)
+    VALUES ('old-private-leak','bot.mentioned','task-1','bot-dzen','dzen',?,'failed',1,'2026-11-18','2026-11-18')`)
+    .run(JSON.stringify({ message: { id: "private-source", text: "private @dzen" } }));
+  let calls = 0;
+  const result = await retryOutboxEvent({ db, config: { url: "https://hooks.example/synthetic" }, fetch: async () => {
+    calls++; return new Response(null, { status: 204 });
+  } }, "old-private-leak", "task-1");
+  assert.equal(calls, 0);
+  assert.match(result.lastError, /больше недоступно/);
 });
 
 test("local webhook receiver gets task.assigned and keeps the original payload on retry", async () => {

@@ -445,7 +445,7 @@ export async function retryBotWebhook(form: FormData): Promise<void> {
     const id = taskId(form);
     const eventId = str(form, "eventId");
     if (!/^[a-zA-Z0-9_-]+$/.test(eventId)) throw new FormError("Событие не найдено.");
-    const row = await retryAgentDelivery(getD1(), eventId);
+    const row = await retryAgentDelivery(getD1(), eventId, id);
     if (!row) throw new FormError("Событие не найдено.");
     return { id, message: row.status === "delivered" ? "Событие повторно передано боту." : "Не удалось повторно передать событие боту." };
   });
