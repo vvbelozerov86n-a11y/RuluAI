@@ -53,8 +53,8 @@ export default async function RootLayout({
           <span className="workspace-label">Моя команда</span>
           <div className="topbar-right">
             <span className="prototype-label">Рабочая версия</span>
-            <Link className="team-button" href="/team" aria-label="Открыть команду">
-              <span className="team-button-label">Команда и AI</span>
+            <Link className="team-button" href="/team" aria-label="Сотрудники и боты">
+              <span className="team-button-label">Сотрудники и боты</span>
               {user ? (
                 <span className="avatar small" title={user.email}>
                   {initialsOf(user.fullName || user.displayName)}

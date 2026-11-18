@@ -273,7 +273,7 @@ test("composer captures the rejected submitted revision separately and renders r
   assert.doesNotMatch(html,/Сообщение остаётся в форме/);
 });
 
-test("root, group and task pages fetch delivery metadata only for a manager and strip private payloads", async () => {
+test("home never fetches root deliveries while group and task pages expose only safe manager metadata", async () => {
   for (const role of ["manager", "executor", "viewer"]) {
     for (const kind of ["root", "group", "leaf"]) {
       const node = { id: kind === "root" ? "root" : "task", kind: kind === "root" ? "group" : kind };
@@ -288,14 +288,15 @@ test("root, group and task pages fetch delivery metadata only for a manager and 
       } });
       const { default: Page } = h.load(kind === "root" ? "app/page.tsx" : "app/t/[id]/page.tsx");
       const element = await Page({ params: Promise.resolve({ id: node.id }), searchParams: Promise.resolve({}) });
-      assert.equal(calls.length, role === "manager" ? 1 : 0, `${role}/${kind}`);
-      assert.equal(element.props.deliveries.length, role === "manager" ? 1 : 0);
-      assert.ok(!JSON.stringify(element.props.deliveries).includes("PRIVATE_PAYLOAD_SENTINEL"));
+      const expected = role === "manager" && kind !== "root" ? 1 : 0;
+      assert.equal(calls.length, expected, `${role}/${kind}`);
+      assert.equal((element.props.deliveries ?? []).length, expected);
+      assert.ok(!JSON.stringify(element.props.deliveries ?? []).includes("PRIVATE_PAYLOAD_SENTINEL"));
     }
   }
 });
 
-test("group and root views render delivery failures and retry controls", () => {
+test("nested groups retain delivery failures and retries while the home overview omits them", () => {
   const h = ui();
   const { GroupView } = h.load("components/ruli/views.tsx");
   for (const id of ["root", "group"]) {
@@ -304,7 +305,11 @@ test("group and root views render delivery failures and retry controls", () => {
       node, path: [node], members: [], today: "2026-11-18", viewer: { role: "manager", memberId: "me" }, mode: "view",
       deliveries: [delivery("group-failure", "failed")],
     });
-    assert.match(html, /Не доставлено боту/);
-    assert.match(html, /name="eventId" value="group-failure"/);
+    if (id === "root") {
+      assert.doesNotMatch(html, /Не доставлено боту|name="eventId" value="group-failure"/);
+    } else {
+      assert.match(html, /Не доставлено боту/);
+      assert.match(html, /name="eventId" value="group-failure"/);
+    }
   }
 });

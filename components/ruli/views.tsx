@@ -7,6 +7,7 @@ import {OwnerChip,ParticipantCounters,ProgressBar,SignalChip,StateChip,TaskStatu
 import {ResultForm} from "./result-form";
 import {SubmitButton} from "./submit-button";
 import {TaskCollaboration} from "./collaboration";
+import {TaskAssignments} from "./task-assignments";
 import {TaskAiPanel} from "./ai-task";
 import {loadTaskAi} from "@/lib/ruli/ai";
 import {BotDeliveryStatus,type DeliverySummary} from "./bot-delivery";
@@ -34,7 +35,7 @@ export function TaskCard({node,index,siblingCount,mode,members,today,viewer,path
   const nested=node.kind==="group", s=stats(node,today),size=BLOCK_SIZES[node.size],people=branchPeople(node,members),owner=members.find(m=>m.id===node.ownerId);
   const late=Boolean(overdueSource({node,path},today))||(nested&&taskAttentionSummary(node,today).late>0);
   return <article className={`task-block bento-card size-${node.size} theme-${node.theme}`} style={{"--span-w":size.w,"--span-h":size.h} as CSSProperties}>
-    <Link className="block-open" href={taskHref(node.id,mode)} aria-label={`${nested?"Открыть подзадачи: ":"Открыть задачу: "}${node.title}`}/>
+    <a className="block-open" href={taskHref(node.id,mode)} aria-label={`${nested?"Открыть подзадачи: ":"Открыть задачу: "}${node.title}`}/>
     <div className="block-top"><span className="block-index">{String(index+1).padStart(2,"0")}</span><SignalChip late={late} review={s.review} nested={nested} status={node.status}/><span className="enter-arrow" aria-hidden="true">↘</span></div>
     <div className="block-title"><h2 title={node.title}>{node.title}</h2><span className="block-subtitle">{nested?plural(node.children.length,"подзадача","подзадачи","подзадач"):"Задача"}</span></div>
     <div className="card-owner">{owner?<><span>Ответственный</span><OwnerChip member={owner}/></>:null}</div>
@@ -53,14 +54,8 @@ export function TaskCard({node,index,siblingCount,mode,members,today,viewer,path
 
 function viewHref(id:string,layout:OverviewLayout="cards",mode:ViewMode="view") {return `${taskHref(id,mode)}&layout=${layout}`;}
 
-function TaskContents({detail=false}:{detail?:boolean}) {
-  return <nav className="task-contents" aria-label="Перейти к разделу"><span>Перейти к разделу:</span><a href={detail?"#task-details":"#task-list"}>{detail?"Описание и результат":"Задачи"}</a><a href="#discussion">Обсуждение</a><a href="#schedule">График выполнения</a></nav>;
-}
-
-function AttentionSummary({tree,today,filters}:{tree:TaskNode;today:string;filters:TaskFilters}) {
-  const summary=taskAttentionSummary(tree,today);
-  const items=[{label:"Ждут проверки",count:summary.review,query:"status=review",active:filters.status==="review"},{label:"Просрочены",count:summary.late,query:"late=1",active:filters.late==="1"},{label:"Срок сегодня",count:summary.today,query:"due=today",active:filters.due==="today"}];
-  return <section className="attention-summary" aria-label="Требуют внимания">{items.map(item=><a key={item.query} href={`/?${item.query}#task-results`} className={item.active?"active":undefined}><strong>{item.count}</strong><span>{item.label}</span><span className="sr-only"> — открыть задачи</span></a>)}</section>;
+function TaskContents({detail=false,manager=false}:{detail?:boolean;manager?:boolean}) {
+  return <nav className="task-contents" aria-label="Перейти к разделу"><span>Перейти к разделу:</span><a href={detail?"#task-details":"#task-list"}>{detail?"Описание и результат":"Задачи"}</a>{manager?<a href="#task-team">Сотрудники и боты</a>:null}<a href="#discussion">Чаты задачи</a></nav>;
 }
 
 function CompactTaskList({entries,members,today,mode,showPath=false}:{entries:TaskEntry[];members:Member[];today:string;mode:ViewMode;showPath?:boolean}) {
@@ -97,21 +92,20 @@ function TaskSearch({tree,members,filters,today,layout}:{tree:TaskNode;members:M
 
 type ViewProps={node:TaskNode;path:TaskNode[];mode:ViewMode;members:Member[];today:string;viewer:AccessContext;flash?:string;error?:string;channel?:string;filters?:TaskFilters;layout?:OverviewLayout;deliveries?:DeliverySummary[]};
 export function GroupView({node,path,mode,members,today,viewer,flash,error,channel,filters:rawFilters={},layout="cards",deliveries=[]}:ViewProps) {
-  const filters=normalizeTaskFilters(rawFilters),isRoot=node.id===ROOT_ID,s=stats(node,today),owner=members.find(m=>m.id===node.ownerId),manager=canManage(viewer),filtered=isRoot&&hasTaskFilters(filters),cards=layout==="cards"||mode==="build",children=node.children.filter(child=>!child.deletedAt);
+  const filters=normalizeTaskFilters(rawFilters),isRoot=node.id===ROOT_ID,s=stats(node,today),owner=members.find(m=>m.id===node.ownerId),manager=canManage(viewer),filtered=isRoot&&hasTaskFilters(filters),cards=isRoot||layout==="cards"||mode==="build",children=node.children.filter(child=>!child.deletedAt);
   const canUnnest=node.kind==="group"&&node.children.length===1&&node.children[0].kind==="leaf"&&node.children[0].splitSourceId===node.id;
   return <main className={`workspace task-overview${mode==="build"?" is-building":""}`}>
-    <NavigationRow path={path} mode={mode}/><Toasts flash={flash} error={error}/>
+    {!isRoot?<NavigationRow path={path} mode={mode}/>:null}<Toasts flash={flash} error={error}/>
     <div className="page-heading"><div><h1 id="task-title">{node.title}</h1><p>{isRoot?"Задачи и группы команды":"Группа задач"}</p></div>
       <div className="heading-tools">
         {manager?<><Link className="secondary" href="/trash">Корзина</Link><Link className="primary" href={`/new?parent=${node.id}&mode=${mode}`}><Icon name="plus"/>{isRoot?"Новая задача":"Добавить подзадачу"}</Link></>:null}
       </div>
     </div>
-    {isRoot?<><AttentionSummary tree={node} today={today} filters={filters}/><TaskSearch tree={node} members={members} filters={filters} today={today} layout={layout}/></>:<><div className="context-strip"><span><span className="label">ОТВЕТСТВЕННЫЙ</span>{owner?<OwnerChip member={owner}/>:null}</span><span><span className="label">СРОК</span>{node.dueLabel}</span><span className="parent-progress">{s.done} из {s.total} выполнено</span>{manager?<Link href={`/t/${node.id}/edit?mode=${mode}`}>Изменить группу</Link>:null}</div>{manager&&canUnnest?<form className="unnest-form" action={unnestTask}><MutationFields node={node} mode={mode}/><SubmitButton className="secondary">Отменить разбиение на подзадачи</SubmitButton></form>:null}</>}
-    {!filtered?<><TaskContents/><div className="overview-list-toolbar" id="task-list"><h2>{isRoot?"Задачи и группы":"В этой группе"}<span> · {children.length}</span></h2><nav className="overview-view-switch" aria-label="Представление задач"><Link href={viewHref(node.id,"list")} aria-current={!cards&&mode==="view"?"page":undefined}>Список</Link><Link href={viewHref(node.id,"cards")} aria-current={cards&&mode==="view"?"page":undefined}>Карточки</Link>{manager?<Link href={viewHref(node.id,"cards","build")} aria-current={mode==="build"?"page":undefined}>Изменить структуру</Link>:null}</nav></div>
+    {isRoot?<details className="overview-search-toggle" open={filtered}><summary>Поиск и фильтры</summary><TaskSearch tree={node} members={members} filters={filters} today={today} layout="cards"/></details>:<><div className="context-strip"><span><span className="label">ОТВЕТСТВЕННЫЙ</span>{owner?<OwnerChip member={owner}/>:null}</span><span><span className="label">СРОК</span>{node.dueLabel}</span><span className="parent-progress">{s.done} из {s.total} выполнено</span>{manager?<Link href={`/t/${node.id}/edit?mode=${mode}`}>Изменить группу</Link>:null}</div>{manager&&canUnnest?<form className="unnest-form" action={unnestTask}><MutationFields node={node} mode={mode}/><SubmitButton className="secondary">Отменить разбиение на подзадачи</SubmitButton></form>:null}</>}
+    {!filtered?<>{!isRoot?<TaskContents manager={manager}/>:null}<div className="overview-list-toolbar" id="task-list"><h2>{isRoot?"Задачи и группы":"В этой группе"}<span> · {children.length}</span></h2><nav className="overview-view-switch" aria-label="Представление задач">{!isRoot?<><Link href={viewHref(node.id,"list")} aria-current={!cards&&mode==="view"?"page":undefined}>Список</Link><Link href={viewHref(node.id,"cards")} aria-current={cards&&mode==="view"?"page":undefined}>Карточки</Link></>:mode==="build"?<Link href={viewHref(node.id)}>Готово</Link>:null}{manager?<Link href={viewHref(node.id,"cards","build")} aria-current={mode==="build"?"page":undefined}>Изменить структуру</Link>:null}</nav></div>
       {children.length?cards?<><div className="builder-legend"><span><i className="legend-square human"/>Люди</span><span><i className="legend-square bot"/>AI-боты</span><small>Нажмите на счётчик, чтобы увидеть участников</small></div><section className="grid bento-grid" aria-label={isRoot?"Задачи и группы":"Подзадачи"}>{children.map((child,index)=><TaskCard key={child.id} node={child} path={[...path,child]} index={index} siblingCount={children.length} mode={mode} members={members} today={today} viewer={viewer}/>)}</section></>:<CompactTaskList entries={children.map(child=>({node:child,path:[...path,child]}))} members={members} today={today} mode={mode}/>:<div className="empty-state"><h2>Здесь пока нет задач</h2><p>{manager?"Добавьте первый шаг и назначьте ответственного.":"Руководитель добавит задачи в эту группу."}</p>{manager?<Link className="secondary" href={`/new?parent=${node.id}&mode=${mode}`}>Добавить задачу</Link>:null}</div>}
     </>:null}
-    <BotDeliveryStatus rows={deliveries} manager={manager} taskId={node.id} version={node.version} mode={mode}/>
-    {!filtered?<TaskCollaboration node={node} members={members} viewer={viewer} channel={channel} mode={mode}/>:null}
+    {!isRoot?<>{manager?<TaskAssignments key={`${node.id}:${node.version}`} node={node} members={members} mode={mode}/>:null}<BotDeliveryStatus rows={deliveries} manager={manager} taskId={node.id} version={node.version} mode={mode}/><TaskCollaboration node={node} members={members} viewer={viewer} channel={channel} mode={mode}/></>:null}
     <WorkspaceFooter hint="Откройте задачу или группу, чтобы продолжить работу"/>
   </main>;
 }
@@ -122,7 +116,7 @@ export async function DetailView({node,path,mode,members,today,viewer,flash,erro
   return <main className={`workspace${mode==="build"?" is-building":""}`}>
     <NavigationRow path={path} mode={mode}/><Toasts flash={flash} error={error}/>
     <div className="page-heading"><div><h1 id="task-title">{node.title}</h1><p>Задача · {owner?.type==="bot"?"Ответственный — AI-бот":"Ответственный — человек"}</p></div><TaskStatusChip status={status}/></div>
-    <TaskContents detail/>
+    <TaskContents detail manager={manager}/>
     <div className="leaf-constructor-bar"><ParticipantCounters human={people.counts.human.length} bot={people.counts.bot.length} title={node.title} people={people.list}/><span>Участники задачи</span>{manager?<div><Link className="secondary" href={`/t/${node.id}/edit?mode=${mode}`}>Изменить задачу</Link><form className="inline" action={nestTask}><MutationFields node={node} mode={mode}/><SubmitButton className="secondary">Разбить на подзадачи</SubmitButton></form></div>:null}</div>
     <div className="detail-layout"><article className="detail-card" id="task-details"><h2>Что нужно сделать</h2><p className="prewrap">{node.description||"Описание пока не заполнено."}</p>
       {owner?.type==="bot"?<TaskAiPanel taskId={node.id} version={node.version} data={await loadTaskAi(node,viewer)} manager={manager} clientId={crypto.randomUUID()}/>:null}
@@ -131,6 +125,7 @@ export async function DetailView({node,path,mode,members,today,viewer,flash,erro
       {node.result?<div className="result-content">{node.result}</div>:<div className="result-empty">Результат ещё не добавлен.</div>}
       {status==="review"&&manager?<div className="detail-actions">{([{value:"done",label:"Принять результат"},{value:"doing",label:"На доработку"}] as const).map(action=><form className="inline" action={setStatus} key={action.value}><MutationFields node={node} mode={mode}/><input type="hidden" name="status" value={action.value}/><SubmitButton className={action.value==="done"?"primary":"secondary"}>{action.label}</SubmitButton></form>)}</div>:status==="done"?<div className="detail-actions"><StateChip className="done" label="Результат принят"/>{manager?<form action={setStatus}><MutationFields node={node} mode={mode}/><input type="hidden" name="status" value="doing"/><SubmitButton className="secondary">Вернуть в работу</SubmitButton></form>:null}</div>:canSubmit&&status!=="review"?<ResultForm node={node} mode={mode}/>:null}
     </article><aside className="detail-side"><div className="property"><span className="property-label">ОТВЕТСТВЕННЫЙ</span>{owner?<OwnerChip member={owner} full/>:null}<p className="detail-note">{owner?.role}</p></div><div className="property"><span className="property-label">СРОК</span><span className="property-value">{node.dueLabel}</span>{isOverdue(node,today)?<StateChip className="overdue" label="Срок прошёл"/>:null}</div>{node.priority?<div className="property"><span className="property-label">ПРИОРИТЕТ</span><span className="property-value">{PRIORITY_NAMES[node.priority]}</span></div>:null}<div className="property"><span className="property-label">ГРУППА</span><Link href={taskHref(parent.id,mode)}>{parent.title} ↗</Link></div><div className="property"><span className="property-label">ПРОВЕРЯЕТ</span><span>Руководитель команды</span></div></aside></div>
+    {manager?<TaskAssignments key={`${node.id}:${node.version}`} node={node} members={members} mode={mode}/>:null}
     <TaskCollaboration node={node} members={members} viewer={viewer} channel={channel} mode={mode}/>
     <WorkspaceFooter hint="Путь сверху вернёт вас на любой уровень"/>
   </main>;

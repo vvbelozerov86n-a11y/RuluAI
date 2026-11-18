@@ -118,9 +118,9 @@ export function AiSettings({data}:{data:Settings}) {
   return <section className="ai-settings" aria-labelledby="ai-settings-title">
     <h2 id="ai-settings-title">AI-боты</h2>
     <p>Настройте исполнителей для задач и обсуждений. Модельные боты xAI и OpenAI отвечают в приложении. Агенты Grok Bot получают поручения через вебхук и отвечают HTTP API.</p>
+    <section className="ai-bot-settings ai-create" id="create-bot" aria-labelledby="create-bot-title"><h3 id="create-bot-title">Создать бота</h3><p>Задайте имя, выберите провайдера и модель. Подключение провайдера можно настроить ниже.</p><BotForm providers={data.providers}/></section>
     <div className="ai-provider-status">{data.providers.map(provider=><div key={provider.id}><strong>{provider.label}</strong><span className={`ai-badge ${provider.configured?"ready":"missing"}`}>{providerBadge(provider)}</span></div>)}</div>
     <ConnectionGuide providers={data.providers}/>
     <div className="ai-bot-settings-list">{data.bots.map(bot=><details className="ai-bot-settings" key={bot.memberId}><summary><span><strong>{bot.name}</strong><small>{bot.kind==="agent"?bot.slug||"агент":bot.model}</small></span><span className={`ai-badge ${!bot.enabled?"disabled":bot.ready?"ready":"missing"}`}>{botBadge(bot)}</span></summary>{bot.enabled&&!bot.ready&&bot.disabledReason?<p className="ai-connection missing">{bot.disabledReason}</p>:null}<BotForm bot={bot} providers={data.providers}/></details>)}</div>
-    <details className="ai-bot-settings ai-create"><summary>Создать бота</summary><BotForm providers={data.providers}/></details>
   </section>;
 }

@@ -1,0 +1,36 @@
+.team-management .team-section-nav { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin:24px 0; }
+.team-management .team-section-nav a { display:flex; flex-direction:column; gap:7px; padding:17px; border:1px solid #617d79; border-radius:10px; background:#223d3c; color:#e1eee4; text-decoration:none; }
+.team-management .team-section-nav a:hover { background:#2b4a44; border-color:#a1c8ab; }
+.team-management .team-section-nav strong { font-size:15px; line-height:1.4; }
+.team-management .team-section-nav span { font-size:12px; line-height:1.5; color:#bdd2c7; }
+.team-management :is(#register-employee,#ai-settings-title,#create-bot) { scroll-margin-top:24px; }
+.team-management .team-access { margin-top:24px; padding-top:24px; }
+.team-management .editor-panel :is(.team-access,.team-people) h2 { font-size:22px; color:#dcebe3; margin:0 0 12px; }
+.team-management .editor-panel .team-access p { color:#bbd0c8; font-size:14px; }
+.team-management .team-registration-form { padding:4px 0 22px; }
+.team-management .team-registration-form :is(input,select) { min-height:44px; }
+.team-management .team-registration-form input[readonly] { color:#a5bbb1; }
+.team-management .editor-panel .team-field-help { margin:-7px 0 17px; font-size:12px; line-height:1.6; }
+.team-management .team-access-help { background:#1e3638; border:1px solid #4d706d; border-radius:10px; padding:18px; }
+.team-management .team-access-help h3 { margin:0 0 12px; font-size:16px; }
+.team-management .team-access-help ol { padding-left:22px; margin:0; color:#c7dbd2; font-size:13px; line-height:1.7; }
+.team-management .team-access-help li+li { margin-top:9px; }
+.team-management .team-signin-actions { display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin-top:18px; }
+.team-management .team-signin-actions :is(button,a) { min-height:44px; }
+.team-management .team-signin-actions button { padding:10px 14px; font:inherit; font-size:13px; cursor:pointer; border-radius:7px; border:1px solid #73958a; color:#e4eee5; background:#294b43; }
+.team-management .team-signin-actions a { display:inline-flex; align-items:center; flex-wrap:wrap; gap:4px; color:#d2e6be; font-size:13px; }
+.team-management .team-signin-actions a span { color:#aec8bb; font-size:11px; }
+.team-management .team-accounts { margin-top:20px; }
+.team-management .team-accounts summary { cursor:pointer; padding:12px 0; font-size:14px; color:#dcebe3; }
+.team-management .account-list { margin:0; overflow-wrap:anywhere; }
+.team-management .team-people { border-top:1px solid #47636a; padding-top:24px; margin-top:28px; }
+.team-management .ai-create { padding:20px; margin:22px 0; scroll-margin-top:24px; }
+.team-management .ai-create h3 { font-size:19px; margin:0 0 10px; }
+.team-management .team-section-nav a:focus-visible,.team-management .team-signin-actions :is(a,button):focus-visible { outline:3px solid #bad29c; outline-offset:3px; }
+@media(max-width:640px) {
+  .team-management .team-section-nav { grid-template-columns:1fr; }
+  .team-management .team-section-nav a { padding:14px; }
+  .team-management .team-access-help,.team-management .ai-create { padding:14px; }
+  .team-management .team-signin-actions { align-items:stretch; flex-direction:column; gap:8px; }
+  .team-management .team-signin-actions button { width:100%; }
+}

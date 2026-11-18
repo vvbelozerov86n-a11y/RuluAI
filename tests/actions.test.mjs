@@ -7,7 +7,6 @@ import ts from "typescript";
 import * as model from "../lib/ruli/model.ts";
 import * as policy from "../lib/ruli/policy.ts";
 import * as mutations from "../lib/ruli/mutations.ts";
-import * as taskSchedule from "../lib/ruli/task-schedule.ts";
 import { collaborationHarness, makeForm, TestRedirect, redirectMessage } from "./collaboration-helper.mjs";
 
 // Execute the shipped server actions against SQLite, replacing only the hosting
@@ -80,7 +79,6 @@ function harness() {
     "../lib/ruli/policy": policy,
     "../lib/ruli/model": model,
     "../lib/ruli/mutations": mutations,
-    "../lib/ruli/task-schedule": taskSchedule,
     "../lib/ruli/agent-runtime": { notifyTaskChangeForAgents: async () => {}, retryAgentDelivery: async (_db, eventId, expectedTaskId) => { h.retryCalls.push({ eventId, expectedTaskId }); return h.retryRow; }, listTaskDeliveries: async () => [], agentWebhookConfigured: () => false },
   };
   const exports = {};
@@ -275,7 +273,7 @@ test("undo split refuses to hide new messages", async () => {
   await success(h.actions.nestTask(h.form()));
   const copy = h.sqlite.prepare("SELECT * FROM tasks WHERE split_source_id='task'").get();
   h.sqlite.prepare("INSERT INTO task_messages(id,task_id,author_id,author_user_id,author_name,body,client_id,created_at) VALUES ('m',?,'anna','u','Анна','Новая работа','c','2026-11-17')").run(copy.id);
-  await rejectedAction(h.actions.unnestTask(h.form()),/переписка или график/);
+  await rejectedAction(h.actions.unnestTask(h.form()),/переписка или сохранённый график/);
   assert.equal(h.row("task").kind,"group");
   assert.equal(h.row(copy.id).deleted_at,null);
 });
@@ -353,7 +351,6 @@ function integratedHarness(t) {
     "../lib/ruli/policy": policy,
     "../lib/ruli/model": model,
     "../lib/ruli/mutations": mutations,
-    "../lib/ruli/task-schedule": taskSchedule,
     "../lib/ruli/agent-runtime": { notifyTaskChangeForAgents: async () => {}, retryAgentDelivery: async () => null, listTaskDeliveries: async () => [], agentWebhookConfigured: () => false },
   };
   const exports = {};
@@ -391,18 +388,23 @@ test("reassign transfers schedule executor and advances entry/plan versions atom
   assert.equal(h.one("SELECT member_id FROM schedule_entries WHERE task_id='letter'").member_id,"max");
 });
 
-test("reassign respects the lower existing plan limit and preserves the submitted form on conflict",async t=>{
+test("reassign succeeds despite retired plan limits and preserves historical intervals",async t=>{
   const h=integratedHarness(t);
   succeeded(await h.invoke("generateTaskSchedule",scheduleForm("letter",2,8)));
   succeeded(await h.invoke("generateTaskSchedule",scheduleForm("visuals",4,4)));
-  const before=h.task("letter");
+  const before=h.one("SELECT * FROM schedule_entries WHERE task_id='letter'");
+  const other=h.one("SELECT * FROM schedule_entries WHERE task_id='visuals'");
+  const otherPlan=h.one("SELECT * FROM schedule_plans WHERE task_id='visuals'");
+  const rootVersion=h.task("root").version;
   const result=await h.taskAction("updateTaskState",{...reassignForm(h,"letter","max"),description:"Keep this text"},true);
-  assert.match(result.state.error,/Нельзя сменить ответственного.*6 ч.*4 ч/);
-  assert.equal(result.state.values.description,"Keep this text");
-  assert.equal(result.state.values.owner,"max");
-  assert.deepEqual(h.task("letter"),before);
-  assert.equal(h.one("SELECT member_id,version FROM schedule_entries WHERE task_id='letter'").member_id,"anna");
-  assert.equal(h.one("SELECT version FROM schedule_plans WHERE task_id='letter'").version,1);
+  succeeded(result);
+  assert.equal(h.task("letter").description,"Keep this text");
+  assert.equal(h.task("letter").owner_id,"max");
+  assert.deepEqual(h.one("SELECT * FROM schedule_entries WHERE task_id='letter'"),{...before,member_id:"max",version:before.version+1});
+  assert.deepEqual(h.one("SELECT * FROM schedule_entries WHERE task_id='visuals'"),other);
+  assert.deepEqual(h.one("SELECT * FROM schedule_plans WHERE task_id='visuals'"),otherPlan);
+  assert.equal(h.one("SELECT version FROM schedule_plans WHERE task_id='letter'").version,2);
+  assert.equal(h.task("root").version,rootVersion+1);
 });
 
 test("reassign rejects a concurrent plan reservation through the root version guard",async t=>{
@@ -437,34 +439,43 @@ test("failure after schedule transfer rolls back task, participant, schedule and
   assert.equal(h.sqlite.prepare("SELECT version FROM schedule_plans").get().version,1);
 });
 
-test("restore refuses 14h on an 8h day and restores after conflicting reservations are cleared",async t=>{
+test("restore succeeds despite retired overlapping reservations and retains all saved plan rows",async t=>{
   const h=integratedHarness(t);
   succeeded(await h.invoke("generateTaskSchedule",scheduleForm("letter",6)));
   succeeded(await h.taskAction("deleteTask",{id:"letter",version:h.task("letter").version}));
   succeeded(await h.invoke("generateTaskSchedule",scheduleForm("help",8)));
   const deleted=h.task("letter");
   const form={id:"letter",version:deleted.version,batchId:deleted.deletion_batch_id};
-  const blocked=await h.taskAction("restoreTask",form);
-  assert.match(redirectMessage(blocked),/Нельзя восстановить задачу.*14 ч.*8 ч/);
-  assert.deepEqual(h.task("letter"),deleted);
-  succeeded(await h.invoke("clearTaskSchedule",{taskId:"help",version:1,confirmClear:"yes"}));
+  const entries=h.all("SELECT * FROM schedule_entries ORDER BY id");
+  const plans=h.all("SELECT * FROM schedule_plans ORDER BY task_id");
+  const rootVersion=h.task("root").version;
   succeeded(await h.taskAction("restoreTask",form));
   assert.equal(h.task("letter").deleted_at,null);
-  assert.equal(h.all(h.collaboration.workloadSelect).reduce((sum,row)=>sum+row.hours,0),6);
+  assert.equal(h.task("letter").deletion_batch_id,null);
+  assert.equal(h.task("root").version,rootVersion+1);
+  assert.deepEqual(h.all("SELECT * FROM schedule_entries ORDER BY id"),entries);
+  assert.deepEqual(h.all("SELECT * FROM schedule_plans ORDER BY task_id"),plans);
+  assert.equal(h.all(h.collaboration.workloadSelect).reduce((sum,row)=>sum+row.hours,0),14);
 });
 
-test("restoring a whole batch checks plans that were hidden with the parent",async t=>{
+test("restoring a whole batch retains its saved plans without hidden capacity blocking the group",async t=>{
   const h=integratedHarness(t);
   succeeded(await h.invoke("generateTaskSchedule",scheduleForm("launch",6)));
   succeeded(await h.taskAction("deleteTask",{id:"launch",version:h.task("launch").version}));
   succeeded(await h.invoke("generateTaskSchedule",scheduleForm("help",8)));
   const deleted=h.task("launch");
-  const blocked=await h.taskAction("restoreTask",{id:"launch",version:deleted.version,batchId:deleted.deletion_batch_id});
-  assert.match(redirectMessage(blocked),/Нельзя восстановить задачу/);
-  for(const id of ["launch","letter","visuals"]) assert.ok(h.task(id).deleted_at);
+  const entries=h.all("SELECT * FROM schedule_entries ORDER BY id");
+  const plans=h.all("SELECT * FROM schedule_plans ORDER BY task_id");
+  succeeded(await h.taskAction("restoreTask",{id:"launch",version:deleted.version,batchId:deleted.deletion_batch_id}));
+  for(const id of ["launch","letter","visuals"]) {
+    assert.equal(h.task(id).deleted_at,null);
+    assert.equal(h.task(id).deletion_batch_id,null);
+  }
+  assert.deepEqual(h.all("SELECT * FROM schedule_entries ORDER BY id"),entries);
+  assert.deepEqual(h.all("SELECT * FROM schedule_plans ORDER BY task_id"),plans);
 });
 
-test("restore cannot race a successful plan generation into overbooking",async t=>{
+test("restore still rejects a concurrent root version change",async t=>{
   const h=integratedHarness(t);
   succeeded(await h.invoke("generateTaskSchedule",scheduleForm("letter")));
   succeeded(await h.taskAction("deleteTask",{id:"letter",version:h.task("letter").version}));
@@ -478,24 +489,27 @@ test("restore cannot race a successful plan generation into overbooking",async t
   assert.deepEqual(h.task("letter"),deleted);
 });
 
-test("reopening completed work validates released capacity and succeeds after that time is free",async t=>{
+test("reopening completed work ignores retired capacity while retaining results and saved plans",async t=>{
   const h=integratedHarness(t);
   succeeded(await h.invoke("generateTaskSchedule",scheduleForm("letter")));
   succeeded(await h.taskAction("submitResult",{id:"letter",version:h.task("letter").version,expectedStatus:"todo",result:"Ready"}));
   succeeded(await h.taskAction("setStatus",{id:"letter",version:h.task("letter").version,expectedStatus:"review",status:"done"}));
   assert.equal(h.all(h.collaboration.workloadSelect).length,0);
   succeeded(await h.invoke("generateTaskSchedule",scheduleForm("help",8)));
+  const entries=h.all("SELECT * FROM schedule_entries ORDER BY id");
+  const plans=h.all("SELECT * FROM schedule_plans ORDER BY task_id");
+  const rootVersion=h.task("root").version;
   const form={id:"letter",version:h.task("letter").version,expectedStatus:"done",status:"doing"};
-  const blocked=await h.taskAction("setStatus",form);
-  assert.match(redirectMessage(blocked),/Нельзя вернуть задачу в работу.*14 ч.*8 ч/);
-  assert.equal(h.task("letter").status,"done");
-  assert.equal(h.task("letter").version,form.version);
-  succeeded(await h.invoke("clearTaskSchedule",{taskId:"help",version:1,confirmClear:"yes"}));
   succeeded(await h.taskAction("setStatus",form));
   assert.equal(h.task("letter").status,"doing");
+  assert.equal(h.task("letter").version,form.version+1);
+  assert.equal(h.task("letter").result,"Ready");
+  assert.equal(h.task("root").version,rootVersion+1);
+  assert.deepEqual(h.all("SELECT * FROM schedule_entries ORDER BY id"),entries);
+  assert.deepEqual(h.all("SELECT * FROM schedule_plans ORDER BY task_id"),plans);
 });
 
-test("reopen checks the root version after its capacity read",async t=>{
+test("reopen still checks the root version before the atomic status update",async t=>{
   const h=integratedHarness(t);
   succeeded(await h.invoke("generateTaskSchedule",scheduleForm("letter")));
   h.sqlite.exec("UPDATE tasks SET status='done' WHERE id='letter'");
@@ -508,15 +522,16 @@ test("reopen checks the root version after its capacity read",async t=>{
   assert.equal(h.task("letter").status,"done");
 });
 
-test("capacity guards distribute multi-day hours and ignore unrelated existing overload",async()=>{
+test("reassignment retains multi-day history even when retired limits would be exceeded",async()=>{
   const h=harness();
   h.sqlite.exec(`INSERT INTO schedule_plans(task_id,version,hours_per_day) VALUES ('task',1,8),('neighbor',1,4);
     INSERT INTO schedule_entries(id,plan_task_id,task_id,member_id,title,start_date,end_date,hours) VALUES
     ('incoming','task','task','anna','P','2026-11-17','2026-11-18',12),
     ('other','neighbor','neighbor','max','Q','2026-11-18','2026-11-18',4);`);
-  const blocked=await h.actions.updateTaskState({},h.form({owner:"max"}));
-  assert.match(blocked.error,/2026-11-18.*10 ч.*4 ч/);
-  h.sqlite.exec("UPDATE schedule_entries SET start_date='2026-12-01',end_date='2026-12-01' WHERE id='other'");
+  const entries=h.sqlite.prepare("SELECT * FROM schedule_entries ORDER BY id").all().map(entry=>({...entry}));
   await success(h.actions.updateTaskState({},h.form({owner:"max"})));
   assert.equal(h.row("task").owner_id,"max");
+  assert.deepEqual(h.sqlite.prepare("SELECT * FROM schedule_entries ORDER BY id").all().map(entry=>({...entry})),entries.map(entry=>entry.id==="incoming"?{...entry,member_id:"max",version:entry.version+1}:entry));
+  assert.equal(h.sqlite.prepare("SELECT version FROM schedule_plans WHERE task_id='task'").get().version,2);
+  assert.equal(h.sqlite.prepare("SELECT version FROM schedule_plans WHERE task_id='neighbor'").get().version,1);
 });

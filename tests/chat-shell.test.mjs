@@ -12,7 +12,6 @@ import * as model from "../lib/ruli/model.ts";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const require = createRequire(import.meta.url);
-const noop = () => {};
 const human = { id: "anna", name: "Анна", shortName: "Анна", role: "Маркетинг", initials: "АС", color: "rose", type: "human" };
 const bot = { id: "analyst", name: "Исследователь", shortName: "AI", role: "Аналитика", initials: "AI", color: "bot", type: "bot" };
 const node = { id: "task", title: "Рабочая задача", kind: "leaf", children: [], participants: [], ownerId: "anna", version: 1 };
@@ -25,7 +24,6 @@ function harness({ channels = [human, bot], viewerRole = "manager", bots = [], r
       captured.channels.push(selected);
       return { channels, messages: [], messagePage: { hasMore: false, beforeCursor: null }, entries: [], scheduleVersion: 0 };
     } },
-    "@/app/collaboration-actions": { generateTaskSchedule: noop, updateScheduleEntry: noop, clearTaskSchedule: noop },
     "@/lib/ruli/access": { canManage: viewer => viewer.role === "manager" },
     "@/lib/ruli/model": model,
     "@/lib/ruli/ai": { loadTaskAi: async () => ({ bots, chatRuns: runs }) },
@@ -71,6 +69,7 @@ test("chat shell projects AI run metadata without exposing stored output or requ
 test("executor sees the manager conversation and inaccessible channels fall back before rendering", async () => {
   const h = harness({ channels: [human], viewerRole: "executor" });
   const html = await h.render("anna");
+  assert.doesNotMatch(html, /id="schedule"|href="#schedule"|График|график/);
   assert.match(html, /С руководителем/);
   assert.match(html, /Ваш личный диалог с руководителем/);
   assert.doesNotMatch(html, /личный · Анна/);
@@ -90,7 +89,8 @@ test("read-only chat has no composer and agent badges describe configuration rat
   assert.equal(viewer.captured.composer.length, 0);
   assert.equal(viewer.captured.feed[0].canWrite, false);
   assert.match(html, /доступ для просмотра/);
-  assert.match(html, /id="schedule"/);
+  assert.doesNotMatch(html, /id="schedule"|href="#schedule"|График|график/);
+  assert.match(html, /aria-label="Обсуждение задачи"/);
   assert.match(html, /href="#task-title"/);
   for (const [extra, label] of [
     [{ enabled: true, configured: true, ready: true }, "Настроен"],
@@ -101,6 +101,7 @@ test("read-only chat has no composer and agent badges describe configuration rat
     const rendered = await h.render("analyst");
     assert.match(rendered, new RegExp(label));
     assert.match(rendered, /Grok Bot/);
+    assert.doesNotMatch(rendered, /id="schedule"|href="#schedule"|График|график/);
     assert.doesNotMatch(rendered, /В сети|Онлайн|online|прочитано|прикрепить файл/i);
   }
 });
