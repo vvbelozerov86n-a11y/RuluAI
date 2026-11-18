@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#102225">
+  <title>Рули — доска задач для команды</title>
+  <meta name="description" content="Организуйте работу компании в Рули. Распределяйте задачи, обсуждайте детали и принимайте результаты на одной доске.">
+  <link rel="icon" href="/ruli-promo/mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/ruli-promo/ruli.css">
+</head>
+<body>
+  <a class="skip" href="#main">Перейти к содержанию</a>
+  <header class="masthead wrap">
+    <a class="brand" href="/ruli" aria-label="Рули — о продукте"><img src="/ruli-promo/mark.svg" alt="" width="36" height="36">рули<span>.</span></a>
+    <nav aria-label="Основная навигация">
+      <a class="showcase-link" href="/vitrina">Витрина</a>
+      <a class="login" href="/signin-with-chatgpt?return_to=%2F" target="_top">Войти в Рули</a>
+    </nav>
+  </header>
+  <main id="main">
+    <section class="hero wrap" aria-labelledby="intro-title">
+      <div class="intro">
+        <p class="category">Доска задач для команды</p>
+        <h1 id="intro-title">От задачи<br><em>до результата.</em></h1>
+        <p class="lead">Поручайте задачи сотрудникам и ИИ-исполнителям. На одной доске видно, кто за что отвечает, когда сдавать работу и что уже ждёт проверки.</p>
+        <div class="actions">
+          <a class="primary" href="/register" target="_top">Регистрация компании</a>
+          <a class="underlined" href="#roles">Как это работает</a>
+        </div>
+      </div>
+      <figure class="example">
+        <figcaption><span class="board-symbol" aria-hidden="true"></span>Пример доски</figcaption>
+        <div class="board">
+          <div class="board-head">
+            <p class="board-path">Все задачи <span aria-hidden="true">/</span> Маркетинг</p>
+            <h2>Запуск коллекции</h2>
+          </div>
+          <div class="task-list">
+            <details open class="task review">
+              <summary><span class="task-title">Проверить карточки товаров</span><span class="status">На проверке</span></summary>
+              <div class="task-body"><div class="assignee"><span class="avatar" aria-hidden="true">АК</span>Анна Котова<span class="due">Срок · 25 ноября</span></div><p class="deliverable"><strong>Результат</strong>Тексты и фото готовы для всех двенадцати карточек.</p></div>
+            </details>
+            <details class="task doing">
+              <summary><span class="task-title">Подготовить рассылку</span><span class="status">В работе</span></summary>
+              <div class="task-body"><div class="assignee"><span class="avatar" aria-hidden="true">ИЛ</span>Илья Левин</div><p class="deliverable"><strong>Описание</strong>Собрать подборку новинок и согласовать тему письма.</p></div>
+            </details>
+            <details class="task done">
+              <summary><span class="task-title">Согласовать цены</span><span class="status">Готово</span></summary>
+              <div class="task-body"><div class="assignee"><span class="avatar" aria-hidden="true">МС</span>Мария Соколова</div><p class="deliverable"><strong>Результат</strong>Прайс на новую коллекцию согласован с руководителем.</p></div>
+            </details>
+          </div>
+        </div>
+      </figure>
+    </section>
+    <section class="roles" id="roles" aria-labelledby="roles-title">
+      <div class="wrap">
+        <h2 id="roles-title">Как работает команда</h2>
+        <div class="role-grid">
+          <article class="role">
+            <h3>Руководитель</h3>
+            <p>Регистрирует компанию и отправляет сотрудникам ссылку-приглашение. На доске разбивает проект на задачи, назначает ответственных и принимает готовую работу.</p>
+          </article>
+          <article class="role">
+            <h3>Сотрудник</h3>
+            <p>Вступает в команду по приглашению и заходит через ChatGPT. В карточке видит своё поручение, уточняет детали в чате и отправляет результат на проверку.</p>
+          </article>
+          <article class="role">
+            <h3>ИИ-исполнитель</h3>
+            <p>Руководитель настраивает бота и поручает ему задачу. Бот отвечает в чате карточки и отправляет результат на проверку. Руководитель решает, принять ли работу.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+  </main>
+  <footer class="wrap"><span>Рули · Доска задач</span><a href="/vitrina">Витрина Belozerov AI</a></footer>
+</body>
+</html>

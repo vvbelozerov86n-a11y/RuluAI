@@ -54,3 +54,88 @@
 @media (max-width: 420px) {
   .hero-actions { display: grid; grid-template-columns: 1fr; gap: 10px; }
 }
+
+.workspace-intro a, .service-link {
+  color: #28543e;
+  text-decoration: underline;
+  text-underline-offset: .22em;
+  text-decoration-color: #82a586;
+  font-weight: 700;
+}
+.workspace-intro a:hover, .service-link:hover { text-decoration-color: currentColor; }
+.hero-description, .workspace-intro { font-size: 1rem; }
+.hero-copy h1 { text-wrap: balance; }
+.services-grid, .studio-products {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+.service-item {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: clamp(14px, 2vw, 28px);
+  align-content: start;
+  padding: clamp(22px, 3vw, 42px);
+  border-radius: var(--radius);
+  border: 1px solid #d8ded1;
+  background: #fff;
+}
+.service-item .solution-icon { background: #eaf0e1; }
+.service-item h3 {
+  margin: 3px 0 12px;
+  font-size: clamp(1.25rem, 2vw, 1.65rem);
+  line-height: 1.24;
+  letter-spacing: -.035em;
+}
+.service-item p, .studio-product p { font-size: 1rem; line-height: 1.65; margin: 0; }
+.service-item p { color: #4d5c50; }
+.service-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  margin-top: 10px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  text-align: left;
+  font-size: .94rem;
+}
+.product-section { margin: 0 auto clamp(54px, 7vw, 100px); }
+.studio-product {
+  --product-accent: #b6e6ce;
+  display: grid;
+  justify-items: start;
+  grid-template-rows: auto 1fr auto;
+  gap: 22px;
+  padding: clamp(24px, 3.5vw, 48px);
+  border-radius: var(--radius);
+  color: #f3faf7;
+  background: #192f33;
+}
+.studio-krippi { color: #30203a; background: #ede6f5; --product-accent: #4f346a; }
+.product-glyph { height: 32px; color: var(--product-accent); }
+.glyph-ruli { display: flex; align-items: center; gap: 4px; transform: rotate(-7deg); }
+.glyph-ruli i { width: 6px; height: 18px; background: currentColor; }
+.glyph-ruli i:nth-child(2) { height: 28px; }
+.glyph-ruli i:last-child { height: 23px; }
+.glyph-krippi { font: 700 26px/1.1 monospace; }
+.studio-product h3 { font-size: clamp(2.2rem, 4vw, 3.6rem); letter-spacing: -.055em; margin: 0 0 10px; line-height: 1.06; }
+.studio-product p { max-width: 44ch; }
+.studio-product a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 8px 18px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  color: var(--product-accent);
+  font-weight: 650;
+}
+.studio-product a:hover { color: inherit; }
+@media (max-width: 740px) {
+  .services-grid, .studio-products { grid-template-columns: 1fr; }
+}
+@media (max-width: 420px) {
+  .service-item { display: block; }
+  .service-item .solution-icon { margin-bottom: 16px; }
+}

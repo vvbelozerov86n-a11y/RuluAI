@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f8f7f3">
+  <title>Криппи — подготовка ответов клиентам с ИИ | Belozerov AI</title>
+  <meta name="description" content="Как подготовить ответ клиенту с ИИ, заменив распознанные персональные данные метками. Три версии одного учебного обращения и демонстрация локального стенда Криппи.">
+  <link rel="icon" href="/belozerov-ai/assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/krippi-promo/styles.css">
+</head>
+<body>
+  <a class="skip" href="#main">К содержанию</a>
+  <header class="masthead wrap">
+    <a class="back" href="/vitrina">Belozerov AI</a>
+    <span class="wordmark">Криппи<span>.</span></span>
+    <nav aria-label="Разделы страницы">
+      <a href="#workflow">Как работает</a>
+      <a href="#modules">Модули</a>
+    </nav>
+  </header>
+
+  <main id="main">
+    <section class="hero wrap" aria-labelledby="headline">
+      <div class="lead">
+        <p class="category">Криппи для клиентской поддержки</p>
+        <h1 id="headline">Передайте ИИ <em>суть обращения.</em></h1>
+        <p class="summary">Криппи заменяет распознанные данные клиента метками. Сотрудник видит, какой текст получит модель, и проверяет черновик перед ответом.</p>
+        <a class="button" href="/vitrina?topic=krippi#contact">Запросить демонстрацию</a>
+      </div>
+
+      <div class="example" id="example">
+        <div class="example-heading">
+          <div>
+            <p class="category">Вымышленное обращение</p>
+            <h2>Перенос доставки</h2>
+          </div>
+        </div>
+        <fieldset class="versions">
+          <legend>Версия обращения</legend>
+          <input class="version-input" type="radio" id="version-source" name="version" aria-controls="source-text">
+          <label for="version-source">Исходное</label>
+          <input class="version-input" type="radio" id="version-model" name="version" aria-controls="model-text" checked>
+          <label for="version-model">Для ИИ</label>
+          <input class="version-input" type="radio" id="version-reply" name="version" aria-controls="reply-text">
+          <label for="version-reply">Черновик</label>
+          <div class="panels">
+            <section class="panel" id="source-text" aria-labelledby="source-title">
+              <h3 id="source-title">Сообщение клиента</h3>
+              <p>Я <mark>Лада Примерова</mark>. Можно перенести доставку заказа <mark>DEMO-4821</mark> на пятницу?</p>
+              <p class="note">В учебной карточке есть имя и номер заказа.</p>
+            </section>
+            <section class="panel" id="model-text" aria-labelledby="model-title">
+              <h3 id="model-title">Что увидит ИИ</h3>
+              <p>Я <code>[ФИО_1]</code>. Можно перенести доставку заказа <code>[ЗАКАЗ_1]</code> на пятницу?</p>
+              <p class="note">Метки в примере сокращены. Каждая относится к текущему обращению.</p>
+            </section>
+            <section class="panel" id="reply-text" aria-labelledby="reply-title">
+              <h3 id="reply-title">После восстановления</h3>
+              <p>Здравствуйте, <mark>Лада Примерова</mark>! Уточним, можно ли перенести доставку заказа <mark>DEMO-4821</mark> на пятницу.</p>
+              <p class="note">Сотрудник проверяет черновик и решает, вставить ли его в CRM.</p>
+            </section>
+          </div>
+        </fieldset>
+      </div>
+    </section>
+
+    <section class="workflow wrap" id="workflow" aria-labelledby="workflow-title">
+      <div class="section-intro">
+        <h2 id="workflow-title">Три проверки до ответа клиенту</h2>
+        <p>На локальном стенде сотрудник проходит весь путь в учебной CRM. Черновик готовит имитатор модели.</p>
+      </div>
+      <ol class="checks">
+        <li>
+          <h3>Проверить замены</h3>
+          <p>Криппи помечает распознанные ФИО и инициалы, российские телефоны, email и номера заказов настроенного формата. Сотрудник может выделить и скрыть ещё один фрагмент вручную.</p>
+        </li>
+        <li>
+          <h3>Подтвердить запрос</h3>
+          <p>Сотрудник просматривает точный текст для модели. Если Криппи распознаёт паспорт РФ, СНИЛС или номер банковской карты, обработка останавливается. Ответ можно написать вручную.</p>
+        </li>
+        <li>
+          <h3>Сверить черновик</h3>
+          <p>Криппи сверяет метки ответа с картой замен обращения и блокирует сомнительные метки. Сотрудник проверяет восстановленные данные, вставляет черновик в CRM и редактирует его перед отправкой.</p>
+        </li>
+      </ol>
+    </section>
+
+    <section class="modules" id="modules" aria-labelledby="modules-title">
+      <div class="wrap">
+        <div class="modules-intro">
+          <h2 id="modules-title">Отдельные модули для&nbsp;сайта</h2>
+          <p>Их можно подключать независимо от учебной CRM и поставщика ИИ.</p>
+        </div>
+        <div class="module-grid">
+          <article>
+            <h3>Шифрование при регистрации</h3>
+            <p>Сервер шифрует имя, почту и телефон до записи в базу. Для пароля хранится хеш с индивидуальной солью.</p>
+          </article>
+          <article>
+            <h3>Ограничение массового чтения</h3>
+            <p>Сервер ограничивает частоту запросов к выбранным страницам и API. Когда лимит исчерпан, посетитель получает время ожидания.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+    <section class="contact wrap" aria-labelledby="contact-title">
+      <div>
+        <h2 id="contact-title">Посмотреть Криппи в работе</h2>
+        <p>Покажем локальный стенд на вымышленном обращении и обсудим сценарий вашей поддержки.</p>
+      </div>
+      <a class="button" href="/vitrina?topic=krippi#contact">Обсудить демонстрацию</a>
+    </section>
+  </main>
+
+  <footer class="wrap footer">
+    <span>Криппи</span>
+    <a href="/vitrina">На витрину Belozerov AI</a>
+  </footer>
+</body>
+</html>

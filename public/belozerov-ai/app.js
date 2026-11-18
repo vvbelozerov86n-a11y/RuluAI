@@ -80,17 +80,21 @@
           closeDialog();
         }
       });
+      // A visitor who chose the Krippi consultation arrives at the existing brief.
+      const requestedTopic = new URLSearchParams(window.location.search).get('topic');
+      if (requestedTopic === 'krippi' && window.location.hash === '#contact') {
+        const topic = field('topic');
+        const contactButton = $('#contact [data-open-brief]');
+        if (topic && contactButton) {
+          topic.value = requestedTopic;
+          contactButton.click();
+        }
+      }
     }
 
     const messageFromForm = () => {
       const value = (name) => String(field(name)?.value || '').trim();
-      const topics = {
-        marketplaces: 'Маркетплейсы',
-        business: 'Автоматизация бизнеса',
-        content: 'Контент и личный бренд',
-        other: 'Другая задача',
-      };
-      const topic = topics[value('topic')] || value('topic') || 'Автоматизация';
+      const topic = field('topic')?.selectedOptions[0]?.textContent || 'Автоматизация';
       return {
         subject: `Запрос на автоматизацию — ${topic}`,
         body: [

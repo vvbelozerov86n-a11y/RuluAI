@@ -322,6 +322,9 @@ test("guest homepage opens the standalone showcase and sign-in restores only sup
   assert.equal(response.headers.get("content-type"), "text/html; charset=utf-8");
   const html = await response.text();
   assert.match(html, /<title>Belozerov AI/);
+  assert.match(html, /<a\b[^>]*\bhref="\/ruli"/i);
+  assert.match(html, /<a\b[^>]*\bhref="\/krippi"/i);
+  assert.match(html, /\bid="contact"/);
   const registration = /<a\b[^>]*href="\/register" target="_top"[^>]*>Регистрация компании/;
   const header = html.match(/<header\b[\s\S]*?<\/header>/)?.[0] ?? "";
   const mobileMenu = header.match(/<nav id="mobile-menu"[^>]*>[\s\S]*?<\/nav>/)?.[0] ?? "";
@@ -334,6 +337,31 @@ test("guest homepage opens the standalone showcase and sign-in restores only sup
   assert.ok(links.length);
   for (const [,link] of links) {
     assert.equal(new URL(link,"https://ruli.test").searchParams.get("return_to"), "/?q=demo&mode=build");
+  }
+});
+
+test("public product pages link back to the showcase and expose their primary actions to guests and members", async () => {
+  for (const [slug, product] of [["ruli", "Рули"], ["krippi", "Криппи"]]) {
+    const template = fs.readFileSync(path.join(root, "showcase", slug + ".html"), "utf8");
+    const h = ui({ globals: { Response }, imports: { ["@/showcase/" + slug + ".html?raw"]: template } });
+    const { GET } = h.load("app/" + slug + "/route.ts");
+    for (const headers of [{}, {
+      "oai-authenticated-user-id": "fixture-member",
+      "oai-authenticated-user-email": "member@example.test",
+    }]) {
+      const response = await GET(new Request("https://ruli.test/" + slug, { headers }));
+      assert.equal(response.status, 200);
+      assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
+      const html = await response.text();
+      assert.match(html, new RegExp("<title>[^<]*" + product, "iu"));
+      assert.match(html, /<a\b[^>]*\bhref="\/vitrina"/i);
+      if (slug === "ruli") {
+        assert.match(html, /<a\b[^>]*\bhref="\/register"/i);
+        assert.match(html, /<a\b(?=[^>]*\bhref="\/signin-with-chatgpt\?return_to=%2F")(?=[^>]*\btarget="_top")[^>]*>/i);
+      } else {
+        assert.match(html, /<a\b[^>]*\bhref="\/vitrina\?topic=krippi#contact"/i);
+      }
+    }
   }
 });
 
