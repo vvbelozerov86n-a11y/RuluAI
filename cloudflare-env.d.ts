@@ -9,6 +9,7 @@ declare namespace Cloudflare {
     GROK_BOT_WEBHOOK_KEY?: string;
     GROK_BOT_WEBHOOK_HEADER?: string;
     RULI_BOT_API_TOKEN?: string;
+    RULI_COMPANY_INTEGRATIONS?: string;
     RULI_BASE_URL?: string;
   }
 }

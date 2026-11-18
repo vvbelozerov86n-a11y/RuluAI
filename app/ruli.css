@@ -111,6 +111,15 @@ form.inline { display: contents; }
   white-space: nowrap;
 }
 .auth-link:hover { border-color: #486b68; color: #c0dbcf; }
+.topbar-right .auth-link { display: inline-flex; align-items: center; }
+.entry-panel { margin-top: clamp(12px, 8vh, 80px); }
+.bento .entry-panel > p { color: #bfd3d5; }
+.entry-actions, .company-entry { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.entry-actions { margin-top: 20px; }
+.company-entry {
+  justify-content: space-between; margin-bottom: 24px; padding: 12px 16px;
+  border: 1px solid #385058; border-radius: 8px; color: #d0e1da; background: #1a2a30;
+}
 .result-form textarea {
   width: 100%;
   border: 1px solid #dfe6d5;

@@ -3,9 +3,11 @@ import assert from "node:assert/strict";
 import {draftStorageKey, readDraft, editDraft, acknowledgeDraft} from "../components/ruli/chat-drafts.ts";
 import {placeParticipantPopover} from "../components/ruli/popover-position.ts";
 
-test("private drafts are isolated by account, task and channel without delimiter collisions", () => {
+test("private drafts are isolated by company, account, task and channel without delimiter collisions", () => {
   const contexts = [
     {viewerUserId:"alice", taskId:"task-one"},
+    {workspaceId:"company-a", viewerUserId:"alice", taskId:"task-one"},
+    {workspaceId:"company-b", viewerUserId:"alice", taskId:"task-one"},
     {viewerUserId:"bob", taskId:"task-one"},
     {viewerUserId:"alice", taskId:"task-two"},
     {viewerUserId:"alice", taskId:"task-one", channelMemberId:"anna"},
@@ -14,6 +16,7 @@ test("private drafts are isolated by account, task and channel without delimiter
     {viewerUserId:"alice", taskId:"a:b", channelMemberId:"c"},
   ];
   assert.equal(new Set(contexts.map(draftStorageKey)).size, contexts.length);
+  assert.equal(draftStorageKey({...contexts[0],workspaceId:"legacy"}), "ruli:chat-draft:v2:alice:task-one:general");
 });
 
 test("a saved draft survives reload with the same idempotency key", () => {

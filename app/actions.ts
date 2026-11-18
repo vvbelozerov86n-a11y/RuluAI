@@ -144,6 +144,16 @@ function rootVersionGuard(rootVersion: number, guard?: Statement): Statement {
   };
 }
 
+function activeAssignmentsGuard(ownerId: string, participants: string[]): Statement {
+  // fields() has already deduplicated these IDs. Recheck in the write batch
+  // in case an employee leaves while the form is being saved.
+  const ids = [ownerId, ...participants];
+  return {
+    sql: "(SELECT COUNT(*) FROM members WHERE removed_at IS NULL AND id IN (SELECT value FROM json_each(?))) = ?",
+    params: [JSON.stringify(ids), ids.length],
+  };
+}
+
 const create: Operation = async form => {
   await access(form);
   const parentId = str(form, "parent") || ROOT_ID;
@@ -158,20 +168,21 @@ const create: Operation = async form => {
   const f = await fields(form);
   const nested = form.get("nested") !== null;
   const id = `task-${crypto.randomUUID()}`;
-  await ensureChanged(await runMutation(getD1(), {
+  const assignees = activeAssignmentsGuard(f.ownerId, f.participants);
+  await ensureChanged(await runMutation(await getD1(), {
     id: parentId, version: parentVersion,
-    guard: { sql: "kind = 'group' AND (SELECT COUNT(*) FROM tasks WHERE deleted_at IS NULL) < ?", params: [MAX_NODES] },
+    guard: { sql: `kind = 'group' AND (SELECT COUNT(*) FROM tasks WHERE deleted_at IS NULL) < ? AND ${assignees.sql}`, params: [MAX_NODES, ...assignees.params] },
     statements: gate => [{
       sql: `INSERT INTO tasks (id,parent_id,kind,title,owner_id,status,priority,due_label,due_date,description,result,size,theme,position)
         SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,COALESCE((SELECT MAX(position)+1 FROM tasks WHERE parent_id=? AND deleted_at IS NULL),0) WHERE ${gate.sql}`,
       params: [id,parentId,nested ? "group" : "leaf",f.title,f.ownerId,nested ? null : "todo",f.priority,f.dueLabel,f.dueDate,f.description,"",f.size,f.theme,parentId,...gate.params],
     }, ...participantWrites(id, f.participants, gate, false)],
   }));
-  await notifyTaskChangeForAgents(getD1(), null, {
+  await notifyTaskChangeForAgents(await getD1(), null, {
     id, title: f.title, description: f.description, status: nested ? null : "todo",
     priority: f.priority, due: f.dueDate, parentId, ownerId: f.ownerId, participants: f.participants,
   });
-  return { id, message: nested ? "Группа задач создана — добавьте подзадачи." : "Задача создана." };
+  return { id, message: nested ? "Группа задач создана — добавьте подзадачи." : "Задача создана.", anchor: "task-start" };
 };
 
 const update: Operation = async form => {
@@ -179,13 +190,14 @@ const update: Operation = async form => {
   const { node, version, tree } = await nodeFor(form);
   if (node.id === ROOT_ID) throw new FormError("Общую группу задач нельзя изменить.");
   const f = await fields(form);
-  const db = getD1();
+  const db = await getD1();
   const reassign = node.ownerId !== f.ownerId;
+  const assignees = activeAssignmentsGuard(f.ownerId, f.participants);
   // Schedules are no longer managed in the UI. Preserve their rows and atomic
   // ownership transfer without letting historical capacity block task work.
   await ensureChanged(await runMutation(db, {
     id: node.id, version,
-    guard: reassign ? rootVersionGuard(tree.version) : undefined,
+    guard: reassign ? rootVersionGuard(tree.version, assignees) : assignees,
     set: { sql: "title=?,owner_id=?,size=?,theme=?,priority=?,due_date=?,due_label=?,description=?", params: [f.title,f.ownerId,f.size,f.theme,f.priority,f.dueDate,f.dueLabel,f.description] },
     statements: (gate, token) => [
       ...participantWrites(node.id, f.participants, gate, true),
@@ -199,7 +211,7 @@ const update: Operation = async form => {
       }] : []),
     ],
   }));
-  await notifyTaskChangeForAgents(getD1(), {
+  await notifyTaskChangeForAgents(await getD1(), {
     id: node.id, title: node.title, description: node.description, status: node.status,
     priority: node.priority ?? null, due: node.dueDate, parentId: node.parentId,
     ownerId: node.ownerId, participants: node.participants,
@@ -224,7 +236,7 @@ export async function resizeTaskState(_previous: ActionState, form: FormData): P
     if (node.id === ROOT_ID || !parent) throw new FormError("Размер общей группы изменить нельзя.");
     const size = str(form, "size");
     if (!isBlockSize(size)) throw new FormError("Выберите доступный размер карточки.");
-    await ensureChanged(await runMutation(getD1(), {
+    await ensureChanged(await runMutation(await getD1(), {
       id: node.id, version, set: { sql: "size=?", params: [size] },
     }));
     return { id: parent.id, anchor: `task-card-${node.id}`, message: "Размер карточки сохранён." };
@@ -238,7 +250,7 @@ export async function deleteTask(form: FormData): Promise<void> {
     if (node.id === ROOT_ID) throw new FormError("Нельзя удалить все задачи.");
     const batchId = `delete-${crypto.randomUUID()}`;
     const now = new Date().toISOString();
-    await ensureChanged(await runMutation(getD1(), {
+    await ensureChanged(await runMutation(await getD1(), {
       id: node.id, version,
       set: { sql: "deleted_at=?,deletion_batch_id=?", params: [now,batchId] },
       statements: (gate, token) => [{
@@ -259,7 +271,7 @@ export async function deleteTask(form: FormData): Promise<void> {
 export async function listDeletedTasks(): Promise<Array<{ id: string; title: string; deletedAt: string; deletionBatchId: string; version: number; parentId: string | null }>> {
   const ctx = await requireAccess("/trash");
   if (!canManage(ctx)) return [];
-  const result = await getD1().prepare(`SELECT t.id,t.title,t.deleted_at AS deletedAt,t.deletion_batch_id AS deletionBatchId,t.version,t.parent_id AS parentId
+  const result = await (await getD1()).prepare(`SELECT t.id,t.title,t.deleted_at AS deletedAt,t.deletion_batch_id AS deletionBatchId,t.version,t.parent_id AS parentId
     FROM tasks t WHERE t.deleted_at IS NOT NULL AND t.deletion_batch_id LIKE 'delete-%'
     AND NOT EXISTS (SELECT 1 FROM tasks p WHERE p.id=t.parent_id AND p.deletion_batch_id=t.deletion_batch_id)
     ORDER BY t.deleted_at DESC`).all<{ id: string; title: string; deletedAt: string; deletionBatchId: string; version: number; parentId: string | null }>();
@@ -273,12 +285,24 @@ export async function restoreTask(form: FormData): Promise<void> {
     const version = versionOf(form);
     const batchId = str(form, "batchId") || str(form, "deletionBatchId");
     if (!/^delete-[a-zA-Z0-9-]+$/.test(batchId)) throw new FormError("Выберите удалённую задачу или группу в корзине.");
-    const db = getD1();
-    const deleted = await db.prepare("SELECT parent_id AS parentId FROM tasks WHERE id=? AND version=? AND deleted_at IS NOT NULL AND deletion_batch_id=?").bind(id,version,batchId).first<{ parentId: string }>();
-    if (!deleted) throw new FormError(CONFLICT);
+    const db = await getD1();
     const tree = await loadTree();
-    const parentPath = findPath(deleted.parentId, tree);
+    // Undo can leave a deleted branch under an archived copy or a task that
+    // is a leaf again. User-deleted parents still have to be restored first.
+    const deleted = await db.prepare(`WITH RECURSIVE deleted AS (
+      SELECT parent_id FROM tasks WHERE id=? AND version=? AND deleted_at IS NOT NULL AND deletion_batch_id=?
+    ), parents(id,parent_id,kind,deleted_at,deletion_batch_id) AS (
+      SELECT p.id,p.parent_id,p.kind,p.deleted_at,p.deletion_batch_id FROM tasks p JOIN deleted ON p.id=deleted.parent_id
+      UNION ALL
+      SELECT p.id,p.parent_id,p.kind,p.deleted_at,p.deletion_batch_id FROM tasks p JOIN parents c ON p.id=c.parent_id
+      WHERE c.deletion_batch_id LIKE 'split-undo-%' OR (c.deleted_at IS NULL AND c.kind='leaf')
+    ) SELECT parent_id AS originalParentId,
+      (SELECT id FROM parents WHERE kind='group' AND deleted_at IS NULL) AS parentId FROM deleted`)
+      .bind(id,version,batchId).first<{ originalParentId: string; parentId: string | null }>();
+    if (!deleted) throw new FormError(CONFLICT);
+    const parentPath = deleted.parentId && findPath(deleted.parentId, tree);
     if (!parentPath || parentPath.at(-1)!.kind !== "group") throw new FormError("Сначала восстановите родительскую группу. Восстановление внутрь удалённой группы невозможно.");
+    const parent = parentPath.at(-1)!;
     const depth = await db.prepare(`WITH RECURSIVE branch(id,depth) AS (
       SELECT id,1 FROM tasks WHERE id=? AND deletion_batch_id=?
       UNION ALL SELECT t.id,b.depth+1 FROM tasks t JOIN branch b ON t.parent_id=b.id WHERE t.deletion_batch_id=?
@@ -287,10 +311,10 @@ export async function restoreTask(form: FormData): Promise<void> {
     const restored = await runMutation(db, {
       id,version,deleted:true,
       guard: rootVersionGuard(tree.version, { sql: `deletion_batch_id=? AND EXISTS (SELECT 1 FROM tasks p WHERE p.id=? AND p.kind='group' AND p.deleted_at IS NULL)
-        AND (SELECT COUNT(*) FROM tasks WHERE deleted_at IS NULL OR deletion_batch_id=?)<=?`, params: [batchId,deleted.parentId,batchId,MAX_NODES] }),
+        AND (SELECT COUNT(*) FROM tasks WHERE deleted_at IS NULL OR deletion_batch_id=?)<=?`, params: [batchId,parent.id,batchId,MAX_NODES] }),
       set: {
-        sql: "deleted_at=NULL,deletion_batch_id=NULL,position=COALESCE((SELECT MAX(position)+1 FROM tasks sibling WHERE sibling.parent_id=? AND sibling.deleted_at IS NULL),0)",
-        params: [deleted.parentId],
+        sql: "parent_id=?,deleted_at=NULL,deletion_batch_id=NULL,position=COALESCE((SELECT MAX(position)+1 FROM tasks sibling WHERE sibling.parent_id=? AND sibling.deleted_at IS NULL),0)",
+        params: [parent.id,parent.id],
       },
       statements: (gate,token) => [{
         sql: `UPDATE tasks SET deleted_at=NULL,deletion_batch_id=NULL,version=version+1,updated_at=?,last_mutation_id=? WHERE deletion_batch_id=? AND ${gate.sql}`,
@@ -298,7 +322,10 @@ export async function restoreTask(form: FormData): Promise<void> {
       }],
     });
     if (!restored) throw new FormError("Не удалось восстановить: данные изменились, родительская группа удалена или превышен лимит задач. Обновите корзину.");
-    return { id: deleted.parentId, message: "Задача восстановлена вместе с подзадачами и участниками." };
+    const message = parent.id === deleted.originalParentId
+      ? "Задача восстановлена вместе с подзадачами и участниками."
+      : `Разбиение исходной группы было отменено. Задача с подзадачами восстановлена в группе «${parent.title}».`;
+    return { id: parent.id, message };
   }, "/trash");
 }
 
@@ -312,7 +339,7 @@ export async function moveTask(form: FormData): Promise<void> {
     const index = parent.children.findIndex(item => item.id === node.id);
     const neighbor = parent.children[index + delta];
     if (!neighbor) throw new FormError("Задача уже находится на краю списка.");
-    await ensureChanged(await runMutation(getD1(), {
+    await ensureChanged(await runMutation(await getD1(), {
       id: node.id,version,
       guard: { sql: "EXISTS (SELECT 1 FROM tasks WHERE id=? AND version=? AND deleted_at IS NULL AND parent_id=?)", params: [neighbor.id,neighbor.version,parent.id] },
       set: { sql:"position=?",params:[neighbor.position] },
@@ -332,7 +359,7 @@ export async function nestTask(form: FormData): Promise<void> {
     if (node.kind !== "leaf") throw new FormError("Это уже группа задач.");
     if (path.length >= MAX_DEPTH || countNodes(tree) >= MAX_NODES) throw new FormError("Достигнут лимит задач или вложенности.");
     const childId = `step-${crypto.randomUUID()}`;
-    await ensureChanged(await runMutation(getD1(), {
+    await ensureChanged(await runMutation(await getD1(), {
       id:node.id,version,
       guard:{sql:"kind='leaf' AND (SELECT COUNT(*) FROM tasks WHERE deleted_at IS NULL) < ?",params:[MAX_NODES]},
       set:{sql:"kind='group',status=NULL,result=''",params:[]},
@@ -362,16 +389,19 @@ export async function unnestTask(form: FormData): Promise<void> {
     if (node.title !== child.title || node.ownerId !== child.ownerId || node.dueDate !== child.dueDate || node.description !== child.description || (node.priority ?? null) !== (child.priority ?? null) || !sameParticipants) {
       throw new FormError("Группа и исходная задача уже изменены по-разному. Отмена недоступна, чтобы не потерять правки названия, описания, приоритета или участников.");
     }
-    // Retired empty plan metadata is retained below; only actual work or
-    // conversation would be hidden by archiving the original child.
-    const activity = await getD1().prepare(`SELECT
+    // Internal copies from earlier undos can remain here without being trash.
+    const activity = await (await getD1()).prepare(`WITH RECURSIVE descendants(id,deletion_batch_id) AS (
+      SELECT id,deletion_batch_id FROM tasks WHERE parent_id=?
+      UNION ALL SELECT t.id,t.deletion_batch_id FROM tasks t JOIN descendants d ON t.parent_id=d.id
+    ) SELECT
       (SELECT COUNT(*) FROM task_messages WHERE task_id=?) +
-      (SELECT COUNT(*) FROM schedule_entries WHERE plan_task_id=?) AS count`)
-      .bind(child.id,child.id).first<{ count: number }>();
+      (SELECT COUNT(*) FROM schedule_entries WHERE plan_task_id=?) AS count,
+      EXISTS (SELECT 1 FROM descendants WHERE deletion_batch_id LIKE 'delete-%') AS hasTrash`)
+      .bind(node.id,child.id,child.id).first<{ count: number; hasTrash: number }>();
     if (Number(activity?.count ?? 0) > 0) throw new FormError("В подзадаче уже есть переписка или сохранённый график, созданный отдельно для неё. Отмена разбиения скрыла бы эту работу, поэтому недоступна.");
     const now = new Date().toISOString();
     const batchId = `split-undo-${crypto.randomUUID()}`;
-    await ensureChanged(await runMutation(getD1(), {
+    await ensureChanged(await runMutation(await getD1(), {
       id:node.id,version,
       guard:{sql:`kind='group' AND (SELECT COUNT(*) FROM tasks WHERE parent_id=? AND deleted_at IS NULL)=1
         AND EXISTS (SELECT 1 FROM tasks WHERE id=? AND version=? AND kind='leaf' AND split_source_id=? AND deleted_at IS NULL)
@@ -386,7 +416,10 @@ export async function unnestTask(form: FormData): Promise<void> {
         params:[now,batchId,now,token,child.id,...gate.params],
       }],
     }));
-    return {id:node.id,message:"Разбиение отменено. Содержание исходной задачи сохранено."};
+    const message = activity?.hasTrash
+      ? "Разбиение отменено. Удалённые подзадачи остались в корзине. При восстановлении они попадут в ближайшую сохранившуюся группу."
+      : "Разбиение отменено. Содержание исходной задачи сохранено.";
+    return {id:node.id,message};
   });
 }
 
@@ -415,7 +448,7 @@ export async function setStatus(form: FormData): Promise<void> {
       sql:"(owner_id=? OR EXISTS (SELECT 1 FROM task_participants p WHERE p.task_id=tasks.id AND p.member_id=?))",
       params:[ctx.memberId,ctx.memberId],
     };
-    await ensureChanged(await runMutation(getD1(),{
+    await ensureChanged(await runMutation(await getD1(),{
       id:node.id,version,status:expected,
       guard:reopen ? rootVersionGuard(tree.version,{sql:"kind='leaf'",params:[]}) : {sql:`kind='leaf' AND ${permission.sql}`,params:permission.params},
       set:{sql:"status=?",params:[status]},
@@ -436,7 +469,7 @@ const submit: Operation = async form => {
     sql:"(owner_id=? OR EXISTS (SELECT 1 FROM task_participants p WHERE p.task_id=tasks.id AND p.member_id=?))",
     params:[ctx.memberId,ctx.memberId],
   };
-  await ensureChanged(await runMutation(getD1(),{
+  await ensureChanged(await runMutation(await getD1(),{
     id:node.id,version,status:expected,
     guard:{sql:`kind='leaf' AND ${permission.sql}`,params:permission.params},
     set:{sql:"result=?,status='review'",params:[result]},
@@ -459,7 +492,7 @@ export async function retryBotWebhook(form: FormData): Promise<void> {
     const id = taskId(form);
     const eventId = str(form, "eventId");
     if (!/^[a-zA-Z0-9_-]+$/.test(eventId)) throw new FormError("Событие не найдено.");
-    const row = await retryAgentDelivery(getD1(), eventId, id);
+    const row = await retryAgentDelivery(await getD1(), eventId, id);
     if (!row) throw new FormError("Событие не найдено.");
     return { id, message: row.status === "delivered" ? "Событие повторно передано боту." : "Не удалось повторно передать событие боту." };
   });

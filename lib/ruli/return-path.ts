@@ -37,6 +37,10 @@ export function returnPath(pathname: string, searchParams?: SearchParamRecord, a
   return safeRelativeReturnPath(qs ? `${pathname}?${qs}` : pathname);
 }
 
+export function homeReturnPath(params: SearchParamRecord): string {
+  return returnPath("/",params,["q","owner","status","late","due","mode","layout","chat"]);
+}
+
 /** Путь карточки или формы изменения; id кодируется как один сегмент. */
 export function taskPagePath(id: string, searchParams?: SearchParamRecord, suffix: "" | "/edit" = ""): string {
   if (typeof id !== "string" || !id) return "/";

@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { check, index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 /**
  * Рули — иерархические задачи команды людей и AI-ботов.
@@ -16,6 +16,7 @@ export const members = sqliteTable("members", {
   initials: text("initials").notNull().default(""),
   color: text("color").notNull().default(""), // rose | sand | blue | violet | bot | ''
   type: text("type").notNull().default("human"), // human | bot
+  removedAt: text("removed_at"),
 });
 
 export const tasks = sqliteTable(
@@ -67,6 +68,31 @@ export const teamAccounts = sqliteTable("team_accounts", {
   memberId: text("member_id").notNull(),
   role: text("role").notNull().default("executor"),
 }, t => [uniqueIndex("team_account_user_idx").on(t.userId), uniqueIndex("team_account_member_idx").on(t.memberId)]);
+
+export const companyProfile = sqliteTable("company_profile", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  inviteToken: text("invite_token").notNull(),
+}, t => [check("company_profile_workspace", sql`${t.id} = 'workspace'`)]);
+
+// Site-wide directories. Task and employee data remain inside each workspace.
+export const workspaces = sqliteTable("workspaces", {
+  id: text("id").primaryKey(),
+  name: text("name"),
+  inviteToken: text("invite_token"),
+}, t => [uniqueIndex("workspaces_invite_token_idx").on(t.inviteToken)]);
+
+export const workspaceAccounts = sqliteTable("workspace_accounts", {
+  email: text("email").primaryKey(),
+  userId: text("user_id"),
+  workspaceId: text("workspace_id").notNull().references(() => workspaces.id),
+}, t => [uniqueIndex("workspace_accounts_user_id_idx").on(t.userId)]);
+
+export const removedTeamAccounts = sqliteTable("removed_team_accounts", {
+  memberId: text("member_id").primaryKey(),
+  email: text("email").notNull(),
+  userId: text("user_id"),
+}, t => [index("removed_team_account_email_idx").on(t.email), index("removed_team_account_user_idx").on(t.userId)]);
 
 export const taskMessages = sqliteTable("task_messages", {
   id: text("id").primaryKey(),

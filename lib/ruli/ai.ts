@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { getD1 } from "../../db";
+import { getCurrentWorkspaceId, getD1 } from "../../db";
 import { requireAccess } from "./access";
 import { getMembers, loadTree } from "./data";
 import { canManage, canReadChannel, canSubmit, canWriteChannel, type AccessContext } from "./policy";
@@ -7,6 +7,7 @@ import { findPath, peopleOf, type Member, type TaskNode } from "./model";
 import { AI_PROVIDERS, generateAiText, safeAiErrorMessage, type AiProvider } from "./ai-provider";
 import { GROK_BOT_PROVIDER, isBotSlug, isGrokBotProvider } from "./bot-catalog";
 import { taskPagePath } from "./return-path";
+import { getCompanyIntegrations } from "./company-integrations";
 
 const BOT_PROVIDERS = [...AI_PROVIDERS.map(item => ({ ...item, kind: "llm" as const })), GROK_BOT_PROVIDER];
 
@@ -341,6 +342,7 @@ export function createAiEngine(deps: AiDependencies) {
     const bots = await Promise.all((await deps.getMembers()).filter(member => member.type === "bot").map(configFor));
     return {
       canManage: true as const,
+      workspaceId: viewer.workspaceId,
       bots,
       providers: BOT_PROVIDERS.map(provider => ({
         ...provider,
@@ -362,7 +364,7 @@ export function createAiEngine(deps: AiDependencies) {
     const model = bounded(input.model, 128, "Модель", true).trim();
     if (!/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/.test(model)) throw new AiError("Название модели содержит недопустимые символы.");
     const apiKey = deps.getApiKey(provider.id)?.trim();
-    if (!apiKey) throw new AiError(`Ключ ${provider.keyName} не настроен. Добавьте секрет в настройках сайта Sites, опубликуйте обновление и повторите проверку.`);
+    if (!apiKey) throw new AiError(`Ключ ${provider.keyName} не настроен. Добавьте подключение компании в секретах Sites по инструкции в разделе AI-ботов и повторите проверку.`);
     // This diagnostic never loads task data, messages, bot instructions or members.
     // The provider adapter bounds the request and sanitizes upstream errors.
     await deps.generate({
@@ -465,21 +467,23 @@ export function createAiEngine(deps: AiDependencies) {
   return { validateAiReply, requestAiReply, retryAiChat, runTaskAi, loadBotSettings, loadTaskAi, saveBot, testAiConnection };
 }
 
-function engine() {
+async function engine() {
+  const db = await getD1();
+  const integrations = getCompanyIntegrations(env, await getCurrentWorkspaceId());
   return createAiEngine({
-    db: getD1(), requireAccess, loadTree, getMembers, generate: generateAiText,
+    db, requireAccess, loadTree, getMembers, generate: generateAiText,
     getApiKey: provider => {
       const keyName = AI_PROVIDERS.find(item => item.id === provider)!.keyName;
-      return (env as unknown as Record<string, string | undefined>)[keyName];
+      return integrations[keyName];
     },
-    agentWebhookConfigured: () => Boolean((env as unknown as { GROK_BOT_WEBHOOK_URL?: string }).GROK_BOT_WEBHOOK_URL?.trim()),
+    agentWebhookConfigured: () => Boolean(integrations.GROK_BOT_WEBHOOK_URL),
   });
 }
-export async function validateAiReply(input: AiReplyRequest) { return engine().validateAiReply(input); }
-export async function requestAiReply(input: AiReplyRequest) { return engine().requestAiReply(input); }
-export async function retryAiChat(input: AiReplyRequest) { return engine().retryAiChat(input); }
-export async function runTaskAi(input: AiTaskRequest) { return engine().runTaskAi(input); }
-export async function loadBotSettings() { return engine().loadBotSettings(); }
-export async function loadTaskAi(node: TaskNode, viewer: AccessContext, channel?: string | null, messageIds?: string[]) { return engine().loadTaskAi(node, viewer, channel, messageIds); }
-export async function saveBot(input: SaveBotInput) { return engine().saveBot(input); }
-export async function testAiConnection(input: AiConnectionInput) { return engine().testAiConnection(input); }
+export async function validateAiReply(input: AiReplyRequest) { return (await engine()).validateAiReply(input); }
+export async function requestAiReply(input: AiReplyRequest) { return (await engine()).requestAiReply(input); }
+export async function retryAiChat(input: AiReplyRequest) { return (await engine()).retryAiChat(input); }
+export async function runTaskAi(input: AiTaskRequest) { return (await engine()).runTaskAi(input); }
+export async function loadBotSettings() { return (await engine()).loadBotSettings(); }
+export async function loadTaskAi(node: TaskNode, viewer: AccessContext, channel?: string | null, messageIds?: string[]) { return (await engine()).loadTaskAi(node, viewer, channel, messageIds); }
+export async function saveBot(input: SaveBotInput) { return (await engine()).saveBot(input); }
+export async function testAiConnection(input: AiConnectionInput) { return (await engine()).testAiConnection(input); }

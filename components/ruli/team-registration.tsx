@@ -1,7 +1,7 @@
 "use client";
 
-import {useActionState,useId,useState} from "react";
-import {addTeamMemberState,updatePendingEmailState} from "@/app/team-actions";
+import {useActionState,useId,useRef,useState} from "react";
+import {addTeamMemberState,removeTeamMemberState,updatePendingEmailState} from "@/app/team-actions";
 import type {ActionState} from "@/lib/ruli/action-state";
 import type {Member} from "@/lib/ruli/model";
 import {SubmitButton} from "./submit-button";
@@ -43,6 +43,33 @@ export function PendingEmailCorrection({memberId,email}:{memberId:string;email:s
       <SubmitButton disabled={pending||nextEmail.trim().toLowerCase()===email} pendingLabel="Сохраняем почту…">Сохранить почту</SubmitButton>
     </form>
   </details>;
+}
+
+export function TeamMemberRemoval({memberId,name}:{memberId:string;name:string}) {
+  const [confirming,setConfirming]=useState(false);
+  const [state,action,pending]=useActionState<ActionState,FormData>(removeTeamMemberState,{});
+  const trigger=useRef<HTMLButtonElement>(null);
+  const id=useId();
+  function cancel() {
+    setConfirming(false);
+    trigger.current?.focus();
+  }
+  return <>
+    <button ref={trigger} type="button" className="team-remove-trigger" aria-label={`Удалить сотрудника ${name}`}
+      disabled={pending} aria-expanded={confirming} aria-controls={confirming?id:undefined} onClick={()=>setConfirming(!confirming)}>Удалить</button>
+    {confirming?<form id={id} className="delete-confirm team-remove-confirm" aria-labelledby={`${id}-title`} aria-busy={pending} action={action}
+      onKeyDown={event=>{if(event.key==="Escape"&&!pending){event.preventDefault();cancel();}}}>
+      <h3 id={`${id}-title`}>Удалить сотрудника «{name}» из команды?</h3>
+      <p>Сотрудник потеряет доступ к Рули. Его задачи перейдут руководителю. Сообщения сохранятся в истории.</p>
+      <input type="hidden" name="memberId" value={memberId}/>
+      <input type="hidden" name="confirmed" value="yes"/>
+      {state.error?<p className="form-error" role="alert">{state.error}</p>:null}
+      <div className="dialog-actions">
+        <button className="secondary" type="button" disabled={pending} onClick={cancel}>Отмена</button>
+        <SubmitButton className="danger-button" disabled={pending} pendingLabel="Удаляем…">Удалить из команды</SubmitButton>
+      </div>
+    </form>:null}
+  </>;
 }
 
 export function TeamSignInLink({signInPath}:{signInPath:string}) {

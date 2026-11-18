@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {dueTodaySource,hasTaskFilters,normalizeTaskFilters,overdueSource,searchTasks,taskAttentionSummary,taskEntries} from "../lib/ruli/task-search.ts";
+import {dueTodaySource,hasTaskFilters,normalizeTaskFilters,overdueSource,searchTasks,taskAttentionSummary,taskDeadlineSource,taskEntries} from "../lib/ruli/task-search.ts";
 
 const today="2026-11-18";
 function leaf(id,changes={}) {
@@ -74,6 +74,18 @@ test("an expired ancestor takes precedence over a later deadline today",()=>{
   assert.deepEqual(taskAttentionSummary(tree,today),{review:0,late:2,today:0});
   assert.deepEqual(searchTasks(tree,{due:"today"},today),[]);
   assert.deepEqual(ids(searchTasks(tree,{late:"1"},today)),["own-today","no-date"]);
+});
+
+test("the earliest upcoming date is shown, preferring the task or nearest group for ties",()=>{
+  const phase=group("phase",[
+    leaf("inherited"),leaf("own-first",{dueDate:"2026-11-19"}),leaf("tie",{dueDate:"2026-11-20"}),
+    leaf("done",{status:"done"}),
+  ],{dueDate:"2026-11-20"});
+  const project=group("project",[phase],{dueDate:"2026-11-20"});
+  const entries=taskEntries(group("root",[project])).filter(({node})=>node.kind==="leaf");
+  assert.deepEqual(entries.map(entry=>taskDeadlineSource(entry,today)?.id),["phase","own-first","tie",undefined]);
+  project.dueDate="2026-11-19";
+  assert.equal(taskDeadlineSource(entries[0],today)?.id,"project");
 });
 
 test("completed work is absent from urgency but searchable as completed",()=>{

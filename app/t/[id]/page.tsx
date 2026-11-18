@@ -23,7 +23,7 @@ export default async function TaskPage({params,searchParams}:PageProps) {
   const path=findPath(id,tree);if(!path)notFound();
   const node=path.at(-1)!,mode:ViewMode=query.mode==="build"&&canManage(viewer)?"build":"view";
   const layout:OverviewLayout=query.layout==="list"?"list":"cards";
-  const deliveries=canManage(viewer)?deliverySummaries(await listTaskDeliveries(getD1(),node.id)):[];
+  const deliveries=canManage(viewer)?deliverySummaries(await listTaskDeliveries(await getD1(),node.id)):[];
   const common={path,members,mode,layout,today:todayISO(),viewer,flash:one(query.flash),error:one(query.error),channel:one(query.chat),deliveries};
   return node.kind==="group"?<GroupView node={node} {...common}/>:<DetailView node={node} {...common}/>;
 }

@@ -1,0 +1,23 @@
+.onboarding-page .editor-page { max-width: 600px; margin: clamp(12px, 5vw, 64px) auto; }
+.onboarding-page .editor-panel { overflow-wrap: anywhere; }
+.onboarding-page .editor-panel h1 { line-height: 1.18; }
+.bento .onboarding-page .editor-panel > p { color: #c0d1ca; margin: 14px 0 24px; }
+.onboarding-page .onboarding-back { display: inline-flex; align-items: center; min-height: 44px; margin-top: 12px; }
+.company-form input, .company-invitation input { min-height: 44px; width: 100%; min-width: 0; }
+.company-form button { margin-top: 8px; }
+.bento .onboarding-page .form-error { color: #ffb8a7; }
+.bento .onboarding-page .company-field-error { margin: -10px 0 15px; font-size: 13px; color: #ffb8a7; }
+.company-form input[aria-invalid=true] { border-color: #df9584; }
+.team-management #company-invite { scroll-margin-top: 20px; }
+.team-management .editor-panel .company-invitation > label { margin-bottom: 6px; }
+.team-management .company-link-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0 16px; }
+.team-management .company-rotate, .team-management .company-manual { margin-top: 14px; }
+.team-management :is(.company-rotate, .company-manual) > summary { display: list-item; cursor: pointer; padding: 12px 0; font-size: 14px; }
+.team-management .company-name { overflow-wrap: anywhere; }
+.team-management .company-help-link { text-decoration: underline; text-underline-offset: 3px; }
+.team-management .editor-panel .company-invitation .team-field-help { margin-top: 0; }
+@media (max-width: 520px) {
+  .onboarding-page .editor-panel { padding: 22px 18px; }
+  .onboarding-page .editor-panel > .primary,
+  .company-form .primary { width: 100%; }
+}

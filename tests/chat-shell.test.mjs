@@ -118,6 +118,16 @@ test("shell passes chat AI permission separately from provider readiness and lab
   assert.equal(viewer.captured.composer.length,0);assert.equal(viewer.captured.feed[0].canWrite,false);
 });
 
+test("manager sees archived personal history with its recipient and without a composer or quoting",async()=>{
+  const h=harness({channels:[{...human,removedAt:"2026-11-18"}]});
+  const html=await h.render("anna");
+  assert.match(html,/Архив диалога/);
+  assert.match(html,/Сотрудник удалён из команды/);
+  assert.equal(h.captured.feed[0].channelMemberId,"anna");
+  assert.equal(h.captured.feed[0].canWrite,false);
+  assert.equal(h.captured.composer.length,0);
+});
+
 test("shell safely projects a saved stale answer without requester or internal run fields",async()=>{
   const h=harness({runs:[{id:"stale",kind:"chat",taskId:"task",botMemberId:"analyst",channelMemberId:"analyst",inputMessageId:"m",status:"stale",canRetry:true,error:"changed",
     createdAt:"2026-11-18",finishedAt:"2026-11-18",output:"SAVED_ANSWER",requesterUserId:"INTERNAL_REQUESTER",leaseToken:"INTERNAL_LEASE"}]});

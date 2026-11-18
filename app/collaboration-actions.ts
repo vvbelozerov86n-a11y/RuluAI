@@ -34,7 +34,7 @@ async function postMessage(form:FormData):Promise<ActionState|undefined> {
   if (!canWriteChannel(viewer,channel) || (channel && !allowed.some(m=>m.id===channel))) return failure(form,"У вас нет доступа к этому диалогу.");
   if (!body || body.length>5000) return failure(form,"Сообщение должно содержать от 1 до 5000 символов. Текст сохранён в форме.");
   if (!/^[a-zA-Z0-9_-]{8,120}$/.test(clientId)) return failure(form,"Обновите страницу перед отправкой сообщения.");
-  const db=getD1();
+  const db=await getD1();
   const previous=await db.prepare("SELECT task_id,channel_member_id,body FROM task_messages WHERE author_user_id=? AND client_id=?")
     .bind(viewer.userId,clientId).first<{task_id:string;channel_member_id:string|null;body:string}>();
   if (previous) {
@@ -44,8 +44,11 @@ async function postMessage(form:FormData):Promise<ActionState|undefined> {
   const result=await db.prepare(`INSERT INTO task_messages
     (id,task_id,channel_member_id,author_id,author_user_id,author_name,body,client_id,created_at)
     SELECT ?,id,?,?,?,?,?,?,? FROM tasks WHERE id=? AND deleted_at IS NULL
+    AND EXISTS (SELECT 1 FROM members WHERE id=? AND removed_at IS NULL)
+    AND (? IS NULL OR EXISTS (SELECT 1 FROM members WHERE id=? AND removed_at IS NULL))
     ON CONFLICT(author_user_id,client_id) DO NOTHING`).bind(
-      messageId,channel,viewer.memberId,viewer.userId,viewer.displayName,body,clientId,new Date().toISOString(),taskId).run();
+      messageId,channel,viewer.memberId,viewer.userId,viewer.displayName,body,clientId,new Date().toISOString(),taskId,
+      viewer.memberId,channel,channel).run();
   if (!result.meta.changes) {
     const retry=await db.prepare("SELECT id FROM task_messages WHERE author_user_id=? AND client_id=? AND task_id=? AND channel_member_id IS ? AND body=?")
       .bind(viewer.userId,clientId,taskId,channel,body).first();
@@ -69,7 +72,7 @@ export async function sendMessageState(_previous:ActionState,form:FormData):Prom
   const channelBot=channel ? members.find(member=>member.id===channel&&member.type==="bot") : undefined;
   const botMemberId=channelBot?.id||value(form,"botMemberId");
   const aiInput={taskId:value(form,"taskId"),channelMemberId:channel,botMemberId,clientId:value(form,"clientId")};
-  const external=botMemberId ? (await getD1().prepare("SELECT provider FROM bot_configs WHERE member_id=?").bind(botMemberId).first<{provider:string}>())?.provider==="grok-bot" : false;
+  const external=botMemberId ? (await (await getD1()).prepare("SELECT provider FROM bot_configs WHERE member_id=?").bind(botMemberId).first<{provider:string}>())?.provider==="grok-bot" : false;
   if(botMemberId && !external) {
     try { await validateAiReply(aiInput); }
     catch(error) { return failure(form,aiErrorMessage(error)); }
@@ -105,7 +108,7 @@ export async function generateTaskSchedule(form:FormData):Promise<void> {
   const options={startDate:value(form,"startDate"),hoursPerDay:Number(value(form,"hoursPerDay")),estimatedHoursPerTask:Number(value(form,"estimatedHoursPerTask")),weekdaysOnly:form.get("weekdaysOnly")!==null};
   const invalid=validateScheduleOptions(options);
   if (invalid) finish(id,invalid,true);
-  const db=getD1();
+  const db=await getD1();
   const existing=await db.prepare(`${workloadSelect} AND s.plan_task_id<>?`).bind(id).all<ScheduleWorkloadRow>();
   const current=await db.prepare("SELECT id FROM schedule_entries WHERE plan_task_id=? LIMIT 1").bind(id).first();
   if (current && !form.has("replaceConfirmed")) finish(id,"Подтвердите замену текущего графика и ручных правок.",true);
@@ -148,7 +151,7 @@ export async function updateScheduleEntry(form:FormData):Promise<void> {
   const id=value(form,"id"), start=value(form,"startDate"), end=value(form,"endDate"), hours=Number(value(form,"hours"));
   const version=Number(value(form,"version")), planVersion=Number(value(form,"planVersion"));
   if (![version,planVersion].every(n=>Number.isSafeInteger(n)&&n>=1)) finish(taskId,"Обновите график перед изменением",true);
-  const db=getD1();
+  const db=await getD1();
   const settings=await db.prepare("SELECT hours_per_day AS hoursPerDay,weekdays_only AS weekdaysOnly FROM schedule_plans WHERE task_id=?")
     .bind(taskId).first<{hoursPerDay:number;weekdaysOnly:number}>();
   if (!settings) finish(taskId,"Сначала сформируйте график",true);
@@ -190,7 +193,7 @@ export async function clearTaskSchedule(form:FormData):Promise<void> {
   if (!findPath(taskId,tree)) finish("root","Задача не найдена",true);
   const version=Number(value(form,"version"));
   if (!Number.isSafeInteger(version)||version<1) finish(taskId,"Обновите график перед удалением",true);
-  const token=crypto.randomUUID(),db=getD1();
+  const token=crypto.randomUUID(),db=await getD1();
   const guard="EXISTS (SELECT 1 FROM tasks WHERE id='root' AND last_mutation_id=?)";
   const result=await db.batch([
     db.prepare(`UPDATE tasks SET version=version+1,last_mutation_id=? WHERE id='root' AND version=? AND

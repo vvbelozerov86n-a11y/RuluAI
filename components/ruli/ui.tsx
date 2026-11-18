@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { Icon, PersonIcon, BotIcon } from "./icons";
 import type { Member, TaskStatus } from "@/lib/ruli/model";
 import { STATUS_NAMES } from "@/lib/ruli/model";
@@ -27,8 +28,8 @@ export function ParticipantCounters({human,bot,title,people=[]}:{human:number;bo
 export function ProgressBar({percent,label}:{percent:number;label:string}) {
   return <div className="progress-track" role="progressbar" aria-label={`Прогресс: ${label}`} aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100}><i style={{width:`${Math.min(100,Math.max(0,percent))}%`}}/></div>;
 }
-export function SignalChip({late,review,nested,status}:{late:boolean;review:number;nested:boolean;status:TaskStatus|null}) {
-  return <span className="task-signals">{late?<StateChip className="overdue" label="Срок прошёл"/>:null}{review>0&&nested?<StateChip className="review" label={`${review} на проверке`}/>:null}{!nested&&status?<TaskStatusChip status={status}/>:null}</span>;
+export function SignalChip({deadline,review,nested,status}:{deadline:ReactNode;review:number;nested:boolean;status:TaskStatus|null}) {
+  return <span className="task-signals">{deadline}{review>0&&nested?<StateChip className="review" label={`${review} на проверке`}/>:null}{!nested&&status?<TaskStatusChip status={status}/>:null}</span>;
 }
 export function SparkIcon(){return <Icon name="spark"/>;}
 

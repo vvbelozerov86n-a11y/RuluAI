@@ -1,12 +1,13 @@
 import { cache } from "react";
-import { getD1 } from "../../db";
+import { getCurrentWorkspaceId, getD1 } from "../../db";
 import { DEMO_MEMBERS, demoSeedTasks, dueLabelFromISO } from "./model";
 
 /** Schema is migration-owned. A batch prevents a half-initialized demo tree. */
 export const initRuli = cache(async (): Promise<void> => {
-  const db = getD1();
+  const db = await getD1();
   const present = await db.prepare("SELECT id FROM tasks WHERE id='root'").first();
   if (present) return;
+  if (await getCurrentWorkspaceId() !== "legacy") throw new Error("В компании отсутствует рабочая область задач.");
   const statements: D1PreparedStatement[] = DEMO_MEMBERS.map(member => db.prepare(
     "INSERT INTO members (id,name,short_name,role,initials,color,type) VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING"
   ).bind(member.id,member.name,member.shortName,member.role,member.initials,member.color,member.type));

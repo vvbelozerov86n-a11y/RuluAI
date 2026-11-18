@@ -62,6 +62,47 @@ function seedHistory(h, count, { taskId="launch", channel=null, prefix="history"
   return ids;
 }
 
+test("archived employee chats remain readable to the manager only on tasks with private messages",async t=>{
+  const h=fixture(t);
+  seedHistory(h,102,{channel:"anna"});
+  seedHistory(h,1,{prefix:"public"});
+  h.sqlite.exec("UPDATE tasks SET owner_id='me' WHERE owner_id='anna'; UPDATE members SET removed_at=CURRENT_TIMESTAMP WHERE id='anna'; DELETE FROM team_accounts WHERE member_id='anna'");
+  const node=h.common.findPath("launch",await h.loadTree()).at(-1);
+  const data=await h.collaboration.loadTaskCollaboration(node,await h.access.requireAccess(),"anna");
+  assert.ok(data.channels.find(member=>member.id==="anna")?.removedAt);
+  assert.equal(data.messages.length,100);
+  assert.equal(data.messages[0].authorName,"Анна");
+  const pages=messagePages(h);
+  const earlier=await pages.loadMessagePage("launch","anna",data.messagePage.beforeCursor);
+  assert.equal(earlier.messages.length,2);
+  assert.equal(earlier.canWrite,false);
+  const response=await historyRoute(h)(new Request("https://ruli.test/api/tasks/launch/messages?channel=anna"),{params:Promise.resolve({id:"launch"})});
+  assert.equal(response.status,200);
+  assert.equal((await response.json()).canWrite,false);
+  assert.equal((await pages.loadMessagePage("launch")).messages[0].authorName,"Анна");
+  const blocked=await h.invoke("sendMessageState",message({channelMemberId:"anna"}),true);
+  assert.ok(blocked.state.error);
+  await assert.rejects(pages.loadMessagePage("service","anna"),error=>error.status===403);
+  h.as("max");
+  assert.ok(!(await h.collaboration.loadTaskCollaboration(node,{role:"manager"})).channels.some(member=>member.id==="anna"));
+  await assert.rejects(pages.loadMessagePage("launch","anna"),error=>error.status===403);
+});
+
+test("removing an employee between permission check and sending prevents writes to or from that employee",async t=>{
+  for(const channel of ["anna",null]){
+    const h=fixture(t);
+    if(!channel)h.as("anna");
+    h.hooks.beforeRun=sql=>{
+      if(!sql.includes("INSERT INTO task_messages"))return;
+      h.hooks.beforeRun=null;
+      h.sqlite.exec("UPDATE members SET removed_at=CURRENT_TIMESTAMP WHERE id='anna'; DELETE FROM team_accounts WHERE member_id='anna'");
+    };
+    const sent=await h.invoke("sendMessageState",message({channelMemberId:channel}),true);
+    assert.ok(sent.state.error);
+    assert.equal(h.one("SELECT COUNT(*) n FROM task_messages").n,0);
+  }
+});
+
 test("message history pages all 251 equal-timestamp messages exactly once without OFFSET", async t => {
   const h=fixture(t);
   const expected=seedHistory(h,251);
@@ -272,7 +313,7 @@ test("history HTTP endpoint converts revoked team access into JSON 403 without r
   const {redirect}=await import("../node_modules/vinext/dist/shims/navigation-errors.js");
   const identity=h.identities.anna;
   const access=loadModule("lib/ruli/access.ts",{
-    ...h.common,env:{},cache:fn=>fn,initRuli:async()=>{},requireChatGPTUser:async()=>identity,redirect,
+    ...h.common,env:{},cache:fn=>fn,initRuli:async()=>{},getCurrentWorkspaceId:async()=>"legacy",requireChatGPTUser:async()=>identity,redirect,
   },["requireAccess"]);
   const pages=loadModule("lib/ruli/collaboration.ts",{...h.common,...access},["loadMessagePage","MessagePageError"]);
   const route=loadModule("app/api/tasks/[id]/messages/route.ts",{

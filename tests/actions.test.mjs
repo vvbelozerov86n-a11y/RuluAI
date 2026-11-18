@@ -74,7 +74,7 @@ function harness() {
   const modules = {
     "next/navigation": { redirect(url) { throw Object.assign(new Error(url), { digest: "NEXT_REDIRECT", url }); } },
     "../db": { getD1: () => db },
-    "../lib/ruli/data": { loadTree, getMembers: async () => sqlite.prepare("SELECT id,name FROM members").all() },
+    "../lib/ruli/data": { loadTree, getMembers: async () => sqlite.prepare("SELECT id,name FROM members WHERE removed_at IS NULL").all() },
     "../lib/ruli/access": { requireAccess: async () => { h.accessCalls++; if (!h.ctx) throw Object.assign(new Error("sign in"), {digest:"NEXT_REDIRECT"}); return h.ctx; } },
     "../lib/ruli/policy": policy,
     "../lib/ruli/model": model,
@@ -127,6 +127,7 @@ test("creating opens the new task and saves description, deadline and participan
   assert.equal(destination.pathname,`/t/${row.id}`);
   assert.equal(destination.searchParams.get("mode"),"build");
   assert.equal(destination.searchParams.get("flash"),"Задача создана.");
+  assert.equal(destination.hash,"#task-start");
   assert.equal(row.parent_id,"group");
   assert.equal(row.kind,"leaf");
   assert.equal(row.due_date,"2026-12-01");
@@ -146,6 +147,7 @@ test("creating a group opens that group and preserves its deadline and participa
   assert.equal(destination.pathname,`/t/${row.id}`);
   assert.equal(destination.searchParams.get("mode"),"view");
   assert.equal(destination.searchParams.get("flash"),"Группа задач создана — добавьте подзадачи.");
+  assert.equal(destination.hash,"#task-start");
   assert.equal(row.parent_id,"root");
   assert.equal(row.kind,"group");
   assert.equal(row.status,null);
@@ -187,6 +189,23 @@ test("stale editor cannot overwrite fields or participant links, including a rac
   assert.equal(h.row("task").title,"Чужая правка");
   assert.deepEqual(h.sqlite.prepare("SELECT member_id FROM task_participants WHERE task_id='task'").all().map(x=>x.member_id),["max"]);
   assert.equal(h.row("root").version,1);
+});
+
+test("a concurrent departure cannot assign a removed employee as owner or participant", async t => {
+  for (const action of ["createTaskState", "updateTaskState"]) {
+    for (const assignments of [{owner:"new-person"}, {owner:"anna",participants:["new-person"]}]) {
+      const h = harness();
+      t.after(() => h.sqlite.close());
+      h.sqlite.exec("INSERT INTO members (id,name,short_name) VALUES ('new-person','Новый','Н')");
+      h.beforeBatch = () => h.sqlite.exec("UPDATE members SET removed_at=CURRENT_TIMESTAMP WHERE id='new-person'");
+      const form = h.form({parent:"group",parentVersion:1,...assignments});
+      const state = await h.actions[action]({},form);
+      assert.match(state.error, /изменилась/);
+      assert.equal(h.row("task").title, "Поручение");
+      assert.equal(h.sqlite.prepare("SELECT COUNT(*) n FROM tasks").get().n, 4);
+      assert.equal(h.sqlite.prepare("SELECT COUNT(*) n FROM task_participants WHERE member_id='new-person'").get().n, 0);
+    }
+  }
 });
 
 test("a failed dependent statement rolls back fields, versions and participants", async () => {
@@ -266,6 +285,88 @@ test("split and undo preserve leaf content and do not expose internal copies in 
   assert.equal(h.row("task").result,"Сохранённый результат");
   assert.ok(h.row(copy.id).deleted_at);
   assert.equal((await h.actions.listDeletedTasks()).length,0);
+});
+
+test("both split undos succeed with a separately trashed branch and it can still be restored", async t => {
+  const h = harness();
+  t.after(() => h.sqlite.close());
+  await success(h.actions.nestTask(h.form()));
+  const copy = h.sqlite.prepare("SELECT id FROM tasks WHERE split_source_id='task'").get();
+  await success(h.actions.nestTask(h.form({id:copy.id,version:h.row(copy.id).version})));
+  const created = await success(h.actions.createTaskState({}, h.form({
+    title:"Материалы",parent:copy.id,parentVersion:h.row(copy.id).version,nested:"on",
+  })));
+  const id = created.pathname.split("/").at(-1);
+  await success(h.actions.deleteTask(h.form({id,version:h.row(id).version})));
+  const innerUndo = await success(h.actions.unnestTask(h.form({id:copy.id,version:h.row(copy.id).version})));
+  const outerUndo = await success(h.actions.unnestTask(h.form()));
+  for (const undo of [innerUndo, outerUndo]) assert.match(undo.searchParams.get("flash"), /ближайшую сохранившуюся группу/);
+  assert.equal(h.row("task").kind, "leaf");
+  assert.ok(h.row(copy.id).deleted_at);
+  const [trashed] = await h.actions.listDeletedTasks();
+  assert.equal(trashed.id, id);
+  const restored = await success(h.actions.restoreTask(h.form({id,version:trashed.version,batchId:trashed.deletionBatchId})));
+  assert.equal(restored.pathname, "/t/group");
+  assert.match(restored.searchParams.get("flash"), /в группе «Проект»/);
+  assert.equal(h.row(id).parent_id, "group");
+  assert.equal(h.row(id).deleted_at, null);
+});
+
+test("previously stranded trash returns to the nearest surviving group with its subtree and participants", async t => {
+  const h = harness();
+  t.after(() => h.sqlite.close());
+  await success(h.actions.nestTask(h.form()));
+  const copy = h.sqlite.prepare("SELECT id FROM tasks WHERE split_source_id='task'").get();
+  await success(h.actions.nestTask(h.form({id:copy.id,version:h.row(copy.id).version})));
+  await success(h.actions.unnestTask(h.form({id:copy.id,version:h.row(copy.id).version})));
+  await success(h.actions.unnestTask(h.form()));
+  // Original database shape for records stranded before restore followed split undos.
+  h.sqlite.prepare(`INSERT INTO tasks(id,parent_id,kind,title,owner_id,deleted_at,deletion_batch_id) VALUES
+    ('legacy',?,'group','Материалы','anna','2026-11-18','delete-legacy'),
+    ('attachment','legacy','leaf','Согласование','max','2026-11-18','delete-legacy')`).run(copy.id);
+  h.sqlite.exec("INSERT INTO task_participants(task_id,member_id) VALUES ('attachment','anna')");
+  await success(h.actions.deleteTask(h.form({id:"group",version:h.row("group").version})));
+  const form = h.form({id:"legacy",version:h.row("legacy").version,batchId:"delete-legacy"});
+  await rejectedAction(h.actions.restoreTask(form), /родительскую группу/);
+  const group = h.row("group");
+  await success(h.actions.restoreTask(h.form({id:group.id,version:group.version,batchId:group.deletion_batch_id})));
+  const parentVersion = h.row("group").version;
+  const restored = await success(h.actions.restoreTask(form));
+  assert.equal(restored.pathname, "/t/group");
+  assert.match(restored.searchParams.get("flash"), /в группе «Проект»/);
+  assert.equal(h.row("group").version, parentVersion + 1);
+  assert.equal(h.row("legacy").parent_id, "group");
+  assert.equal(h.row("legacy").deleted_at, null);
+  assert.equal(h.row("legacy").position, 2);
+  assert.equal(h.row("attachment").parent_id, "legacy");
+  assert.equal(h.row("attachment").deleted_at, null);
+  assert.ok(h.sqlite.prepare("SELECT 1 FROM task_participants WHERE task_id='attachment' AND member_id='anna'").get());
+  assert.ok(h.row(copy.id).deleted_at);
+  assert.equal((await h.actions.listDeletedTasks()).length, 0);
+});
+
+test("restore racing a split undo retries against the surviving group", async t => {
+  const h = integratedHarness(t);
+  succeeded(await h.taskAction("nestTask", {id:"letter",version:h.task("letter").version}));
+  const created = await h.taskAction("createTask", {
+    parent:"letter",parentVersion:h.task("letter").version,title:"Материалы",owner:"anna",size:"small",theme:"teal",
+  });
+  succeeded(created);
+  const id = new URL(created.redirect, "https://local").pathname.split("/").at(-1);
+  succeeded(await h.taskAction("deleteTask", {id,version:h.task(id).version}));
+  const deleted = h.task(id);
+  const form = {id,version:deleted.version,batchId:deleted.deletion_batch_id};
+  h.hooks.beforeBatch = async () => {
+    h.hooks.beforeBatch = null;
+    succeeded(await h.taskAction("unnestTask", {id:"letter",version:h.task("letter").version}));
+  };
+  const stale = await h.taskAction("restoreTask", form);
+  assert.match(redirectMessage(stale), /данные изменились/);
+  assert.deepEqual(h.task(id), deleted);
+  succeeded(await h.taskAction("restoreTask", form));
+  assert.equal(h.task("letter").kind, "leaf");
+  assert.equal(h.task(id).parent_id, "launch");
+  assert.equal(h.task(id).deleted_at, null);
 });
 
 test("undo split refuses to hide new messages", async () => {

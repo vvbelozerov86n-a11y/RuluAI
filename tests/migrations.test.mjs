@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import { DatabaseSync } from "node:sqlite";
+import { workspaceDirectoryTriggers } from "../lib/ruli/workspace-directory.ts";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const directory = path.join(root, "drizzle");
@@ -42,6 +43,31 @@ test("request hash migration preserves existing bot replies and outbox records",
     const primaryKey = db.prepare("PRAGMA table_info(bot_api_idempotency)").all().filter(column => column.pk).map(column => column.name);
     assert.deepEqual(primaryKey, ["bot_member_id", "idempotency_key"]);
   } finally { db.close(); }
+});
+
+test("workspace directory migration keeps existing logins, pending accounts, company link and task history", () => {
+  const db = new DatabaseSync(":memory:");
+  try {
+    const migrate = entry => db.exec(fs.readFileSync(path.join(directory, `${entry.tag}.sql`), "utf8"));
+    journal.entries.filter(entry => entry.idx < 8).forEach(migrate);
+    db.exec(`INSERT INTO team_accounts(email,user_id,member_id,role) VALUES
+      ('owner@example.test','owner','me','manager'),('pending@example.test',NULL,'anna','viewer');
+      INSERT INTO company_profile VALUES ('workspace','Существующая компания','original-invite');
+      INSERT INTO tasks(id,kind,title,owner_id) VALUES ('prior-task','leaf','Существующая задача','anna');
+      INSERT INTO task_messages VALUES ('msg','prior-task','anna','me','owner','Руководитель','Старое сообщение','old-client-id','2026-11-18')`);
+    migrate(journal.entries.find(entry => entry.idx === 8));
+    assert.deepEqual({...db.prepare("SELECT * FROM workspaces").get()},
+      {id:"legacy",name:"Существующая компания",invite_token:"original-invite"});
+    assert.deepEqual(db.prepare("SELECT * FROM workspace_accounts ORDER BY email").all().map(row=>({...row})), [
+      {email:"owner@example.test",user_id:"owner",workspace_id:"legacy"},
+      {email:"pending@example.test",user_id:null,workspace_id:"legacy"},
+    ]);
+    assert.equal(db.prepare("SELECT owner_id FROM tasks WHERE id='prior-task'").get().owner_id,"anna");
+    assert.equal(db.prepare("SELECT body FROM task_messages WHERE id='msg'").get().body,"Старое сообщение");
+    const normalize = sql => sql.replace(/\s+/g," ").trim();
+    const triggers = db.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND name GLOB 'directory_*'").all();
+    assert.deepEqual(triggers.map(row=>normalize(row.sql)).sort(),workspaceDirectoryTriggers({prepare:normalize},"legacy").sort());
+  } finally {db.close();}
 });
 
 test("unchanged schema generates no duplicate migration", () => {

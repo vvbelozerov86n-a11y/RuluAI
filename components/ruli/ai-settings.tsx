@@ -30,7 +30,7 @@ function ConnectionCheck({provider,model}:{provider:Settings["providers"][number
   </form>;
 }
 
-function ConnectionGuide({providers}:{providers:Settings["providers"]}) {
+function ConnectionGuide({providers,workspaceId}:{providers:Settings["providers"];workspaceId?:string}) {
   const id=useId();
   const llm=providers.filter(provider=>provider.kind!=="agent");
   const [providerId,setProviderId]=useState<string>(llm[0]?.id??providers[0].id);
@@ -52,12 +52,19 @@ function ConnectionGuide({providers}:{providers:Settings["providers"]}) {
         <p className="ai-setup-note">Войдите в аккаунт, выберите проект или команду и создайте API-ключ. Убедитесь, что у аккаунта есть доступ к выбранной модели и API-лимит.</p>
       </li>
       <li><h4>Добавьте секрет в Sites</h4>
+        {workspaceId && workspaceId !== "legacy" ? <>
+          <p>Владелец сайта настраивает подключения компаний в секрете <code>RULI_COMPANY_INTEGRATIONS</code>.</p>
+          <p>ID вашей компании для настройки интеграций</p>
+          <div className="ai-setup-key"><code>{workspaceId}</code></div>
+          <p>В записи этой компании укажите ключ провайдера в поле <code>{selected.keyName}</code>, сохраните секрет и опубликуйте обновление.</p>
+        </> : <>
         <p>В ChatGPT откройте <strong>Sites → ваш сайт «Рули» → настройки сайта → секреты / переменные окружения</strong>. Этот раздел доступен владельцу сайта.</p>
         <p>В поле имени укажите:</p>
         <div className="ai-setup-key"><code>{selected.keyName}</code><button type="button" className="secondary" onClick={copyName}>Копировать имя</button></div>
         <p className="ai-setup-copy" role="status">{copyStatus}</p>
         <p>В значение секрета вставьте ключ, полученный у провайдера. Сохраните, опубликуйте обновление сайта и обновите эту страницу.</p>
         <p className="ai-setup-note">Ключ вводится только в настройках Sites, а не в инструкции бота или чат. Если раздел не виден, обратитесь к владельцу сайта. <a href={sitesHelp} target="_blank" rel="noopener noreferrer">Инструкция Sites (новая вкладка)</a>.</p>
+        </>}
       </li>
       <li><h4>Проверьте ответ модели</h4>
         <label htmlFor={`${id}-model`}>Модель для проверки<input id={`${id}-model`} list={`${id}-models`} value={model} onChange={event=>{setModel(event.target.value);setSelectionVersion(value=>value+1);}} required maxLength={128} spellCheck={false} autoCapitalize="none" aria-describedby={`${id}-model-help`}/></label>
@@ -120,7 +127,7 @@ export function AiSettings({data}:{data:Settings}) {
     <p>Настройте исполнителей для задач и обсуждений. Модельные боты xAI и OpenAI отвечают в приложении. Агенты Grok Bot получают поручения через вебхук и отвечают HTTP API.</p>
     <section className="ai-bot-settings ai-create" id="create-bot" aria-labelledby="create-bot-title"><h3 id="create-bot-title">Создать бота</h3><p>Задайте имя, выберите провайдера и модель. Подключение провайдера можно настроить ниже.</p><BotForm providers={data.providers}/></section>
     <div className="ai-provider-status">{data.providers.map(provider=><div key={provider.id}><strong>{provider.label}</strong><span className={`ai-badge ${provider.configured?"ready":"missing"}`}>{providerBadge(provider)}</span></div>)}</div>
-    <ConnectionGuide providers={data.providers}/>
+    <ConnectionGuide providers={data.providers} workspaceId={data.workspaceId}/>
     <div className="ai-bot-settings-list">{data.bots.map(bot=><details className="ai-bot-settings" key={bot.memberId}><summary><span><strong>{bot.name}</strong><small>{bot.kind==="agent"?bot.slug||"агент":bot.model}</small></span><span className={`ai-badge ${!bot.enabled?"disabled":bot.ready?"ready":"missing"}`}>{botBadge(bot)}</span></summary>{bot.enabled&&!bot.ready&&bot.disabledReason?<p className="ai-connection missing">{bot.disabledReason}</p>:null}<BotForm bot={bot} providers={data.providers}/></details>)}</div>
   </section>;
 }

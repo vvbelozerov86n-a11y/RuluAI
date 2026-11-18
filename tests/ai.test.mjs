@@ -5,6 +5,7 @@ import {collaborationHarness,loadModule,makeForm,TestRedirect,plain} from "./col
 import * as provider from "../lib/ruli/ai-provider.ts";
 import * as mutations from "../lib/ruli/mutations.ts";
 import {projectChatAiRuns} from "../lib/ruli/chat-ai.ts";
+import {getCompanyIntegrations} from "../lib/ruli/company-integrations.ts";
 
 function exported(file) {
   return [...fs.readFileSync(new URL(`../${file}`,import.meta.url),"utf8").matchAll(/^export\s+(?:async\s+)?(?:function|const|class)\s+(\w+)/gm)].map(match=>match[1]);
@@ -18,7 +19,7 @@ function harness(t) {
   for(const id of ["analyst","writer"])h.sqlite.prepare("INSERT INTO bot_configs(member_id,provider,model,system_prompt,enabled,version,updated_at) VALUES(?,'xai','test-model','Отвечай кратко',1,1,?)").run(id,new Date().toISOString());
   const requests=[];
   let responder=async()=>({text:"Подготовленный результат",inputTokens:10,outputTokens:20});
-  const bindings={...h.common,...mutations,...provider,env:h.env,
+  const bindings={...h.common,...mutations,...provider,env:h.env,getCompanyIntegrations,getCurrentWorkspaceId:async()=>"legacy",
     generateAiText:async(input)=>{requests.push(plain(input));return responder(input);}};
   const ai=loadModule("lib/ruli/ai.ts",bindings,exported("lib/ruli/ai.ts"));
   const actions=loadModule("app/ai-actions.ts",{...bindings,...ai},exported("app/ai-actions.ts"));

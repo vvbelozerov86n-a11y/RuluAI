@@ -78,6 +78,8 @@ test("opening a nested group or a leaf keeps its own discussion and selected cha
       const h = harness();
       const props = { ...viewProps(node), viewer: { ...viewer, role }, channel: "anna" };
       const html = node.kind === "group" ? render(h.GroupView, props) : renderToStaticMarkup(await h.DetailView(props));
+      assert.match(html, /<main\b(?=[^>]*id="task-start")(?=[^>]*tabindex="-1")(?=[^>]*aria-labelledby="task-title")/i);
+      assert.match(html, /<h1 id="task-title">/);
       assert.equal(h.chatCalls.length, 1, `${role}/${node.kind}`);
       assert.equal(h.chatCalls[0].node.id, node.id);
       assert.equal(h.chatCalls[0].channel, "anna");
@@ -116,5 +118,62 @@ test("card participant popovers and structure actions remain independent native 
     for (const [, , content] of html.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/g)) {
       assert.doesNotMatch(content, /<(?:a|button|summary|details|form|input|select|textarea)\b/i);
     }
+  }
+});
+
+test("the active filters, reset and search results stay outside the collapsible controls", () => {
+  const h = harness();
+  for (const [query, count] of [["Рабочая группа", 1], ["Нет совпадений", 0]]) {
+    const html = render(h.GroupView, { ...viewProps(root), filters: { q: query } });
+    const afterControls = html.split("</form></details>")[1];
+    assert.ok(afterControls, "only the form is inside the search disclosure");
+    assert.ok(afterControls.includes(`Поиск: ${query}`));
+    assert.match(afterControls, /Сбросить всё/);
+    assert.ok(afterControls.includes(`Найдено: ${count}`));
+    assert.doesNotMatch(afterControls, /bento-grid/);
+  }
+});
+
+test("each team role can read the group's objective and priority", () => {
+  const h = harness();
+  const node = { ...group, description: "Согласовать план выпуска.", priority: "high" };
+  for (const role of ["manager", "executor", "viewer"]) {
+    const html = render(h.GroupView, { ...viewProps(node), viewer: { ...viewer, role } });
+    assert.match(html, /Согласовать план выпуска\.<\/p>/);
+    assert.match(html, /ПРИОРИТЕТ<\/span>Высокий/);
+    assert.equal(html.includes("Изменить группу"), role === "manager");
+  }
+});
+
+test("card, compact list and details identify the same inherited deadline and keep any personal date", async () => {
+  const h = harness();
+  for (const ownDate of [null, "2026-11-25"]) {
+    const node = makeNode("child", { parentId: group.id, dueDate: ownDate, dueLabel: ownDate ? "25 нояб." : "Без срока" });
+    const parent = { ...group, dueDate: "2026-11-17", dueLabel: "Вчера", children: [node] };
+    const props = { ...viewProps(node), path: [root, parent, node] };
+    const card = render(h.TaskCard, { ...props, index: 0, siblingCount: 1 });
+    const list = render(h.GroupView, { ...viewProps(parent), layout: "list" }).match(/<div class="compact-task-due">([\s\S]*?)<\/div>/)[1];
+    const detail = renderToStaticMarkup(await h.DetailView(props)).match(/<span class="property-label">СРОК<\/span>([\s\S]*?)<\/div>/)[1];
+    for (const html of [card, list, detail]) {
+      assert.match(html, /Срок группы прошёл/);
+      assert.match(html, /Срок группы · <time dateTime="2026-11-17">Вчера<\/time>/i);
+      assert.match(html, /Рабочая группа/);
+      assert.doesNotMatch(html, /Без срока/);
+      assert.equal(html.includes("25 нояб."), Boolean(ownDate));
+    }
+  }
+});
+
+test("returning a submitted result keeps its content and gives it a truthful caption", async () => {
+  const h = harness();
+  for (const [status, result, caption] of [
+    ["doing", "Согласованный план", "Результат сохранён"],
+    ["doing", "", "Появится после выполнения"],
+    ["review", "Согласованный план", "Ожидает решения руководителя"],
+    ["done", "Согласованный план", "Проверено"],
+  ]) {
+    const html = renderToStaticMarkup(await h.DetailView(viewProps({ ...leaf, status, result })));
+    assert.ok(html.includes(`<h2>Результат</h2><span>${caption}</span>`));
+    if (result) assert.ok(html.includes(`class="result-content">${result}</div>`));
   }
 });

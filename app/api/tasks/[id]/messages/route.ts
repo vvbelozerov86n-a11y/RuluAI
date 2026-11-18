@@ -1,5 +1,5 @@
 import { getChatGPTUser } from "@/app/chatgpt-auth";
-import { requireAccess, canWriteChannel } from "@/lib/ruli/access";
+import { requireAccess } from "@/lib/ruli/access";
 import { taskPagePath } from "@/lib/ruli/return-path";
 import { loadTree } from "@/lib/ruli/data";
 import { findPath } from "@/lib/ruli/model";
@@ -33,7 +33,7 @@ export async function GET(request:Request,{params}:{params:Promise<{id:string}>}
     const ai=await loadTaskAi(node,viewer,channel??undefined,messageIds);
     const aiRuns=projectChatAiRuns(ai.chatRuns,id,channel,messageIds);
     const aiPending=aiRuns.filter(run=>run.status==="pending").length;
-    return Response.json({...page,aiPending,aiRuns,canWrite:canWriteChannel(viewer,channel)},{headers});
+    return Response.json({...page,aiPending,aiRuns},{headers});
   }
   catch(error) {
     if(error instanceof MessagePageError)return Response.json({error:error.message},{status:error.status,headers});

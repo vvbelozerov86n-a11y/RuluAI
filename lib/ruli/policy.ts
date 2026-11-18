@@ -1,6 +1,7 @@
 import type { TaskNode } from "./model";
 
 export type AccessContext = {
+  workspaceId?: string;
   userId: string;
   memberId: string;
   role: "manager" | "executor" | "viewer";

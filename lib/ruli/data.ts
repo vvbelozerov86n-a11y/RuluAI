@@ -8,7 +8,7 @@ export { initRuli } from "./bootstrap";
 
 export const getMembers = cache(async (): Promise<Member[]> => {
   await requireAccess();
-  const rows = await getDb().select().from(members);
+  const rows = await (await getDb()).select().from(members).where(isNull(members.removedAt));
   const order = DEMO_MEMBERS.map(m => m.id);
   return rows.map(row => ({...row,type:row.type === "bot" ? "bot" as const : "human" as const}))
     .sort((a,b) => order.indexOf(a.id)-order.indexOf(b.id) || a.name.localeCompare(b.name,"ru"));
@@ -16,7 +16,7 @@ export const getMembers = cache(async (): Promise<Member[]> => {
 
 export const loadTree = cache(async (): Promise<TaskNode> => {
   await requireAccess();
-  const db = getDb();
+  const db = await getDb();
   const [taskRows, participantRows] = await Promise.all([
     db.select().from(tasks).where(isNull(tasks.deletedAt)),
     db.select().from(taskParticipants),
@@ -47,6 +47,6 @@ export const loadTree = cache(async (): Promise<TaskNode> => {
 });
 
 export async function nextPosition(parentId: string): Promise<number> {
-  const row = await getDb().get<{max:number|null}>(sql`SELECT MAX(position) AS max FROM tasks WHERE parent_id=${parentId}`);
+  const row = await (await getDb()).get<{max:number|null}>(sql`SELECT MAX(position) AS max FROM tasks WHERE parent_id=${parentId}`);
   return (row?.max ?? -1)+1;
 }

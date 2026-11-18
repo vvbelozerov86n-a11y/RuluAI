@@ -1,5 +1,5 @@
 import { getD1 } from "../../db";
-import { requireAccess, canManage, canReadChannel, type AccessContext } from "./access";
+import { requireAccess, canManage, canReadChannel, canWriteChannel, type AccessContext } from "./access";
 import { taskPagePath } from "./return-path";
 import { getMembers, loadTree } from "./data";
 import { findPath, isISODate, peopleOf, type TaskNode, type Member } from "./model";
@@ -44,12 +44,22 @@ function parseMessageCursor(value:string|undefined|null,taskId:string,channel:st
   }
 }
 
-async function messageAccess(taskId:string) {
+type ChatMember = Member & { removedAt?: string | null };
+
+async function messageAccess(taskId:string, channel:string|null, listChannels=false) {
   const viewer=await requireAccess(taskPagePath(taskId));
   const node=findPath(taskId,await loadTree())?.at(-1);
   if(!node)throw new MessagePageError("Задача не найдена.",404);
-  const channels=taskChannelMembers(node,await getMembers(),viewer);
-  return {viewer,node,channels};
+  const channels:ChatMember[]=taskChannelMembers(node,await getMembers(),viewer);
+  if(canManage(viewer) && (listChannels || (channel && !channels.some(member=>member.id===channel)))) {
+    const archives=await (await getD1()).prepare(`SELECT m.id,m.name,m.short_name AS shortName,m.role,m.initials,m.color,m.type,m.removed_at AS removedAt
+      FROM members m WHERE m.removed_at IS NOT NULL AND m.type='human' AND (? IS NULL OR m.id=?)
+      AND EXISTS (SELECT 1 FROM task_messages msg WHERE msg.task_id=? AND msg.channel_member_id=m.id)
+      ORDER BY m.name,m.id`).bind(listChannels?null:channel,listChannels?null:channel,taskId).all<ChatMember>();
+    const archivedIds=new Set(archives.results.map(member=>member.id));
+    return {viewer,channels:channels.filter(member=>!archivedIds.has(member.id)).concat(archives.results)};
+  }
+  return {viewer,channels};
 }
 
 function permittedChannel(access:Awaited<ReturnType<typeof messageAccess>>,channel:string|null):boolean {
@@ -58,7 +68,7 @@ function permittedChannel(access:Awaited<ReturnType<typeof messageAccess>>,chann
 
 async function readMessagePage(taskId:string,channel:string|null,before?:string|null):Promise<MessagePage> {
   const cursor=parseMessageCursor(before,taskId,channel);
-  const rows=await getD1().prepare(`SELECT id,task_id AS taskId,channel_member_id AS channelMemberId,
+  const rows=await (await getD1()).prepare(`SELECT id,task_id AS taskId,channel_member_id AS channelMemberId,
     author_id AS authorId,author_name AS authorName,body,created_at AS createdAt FROM task_messages
     WHERE task_id=? AND channel_member_id IS ?
       ${cursor?"AND (created_at<? OR (created_at=? AND id<?))":""}
@@ -71,11 +81,12 @@ async function readMessagePage(taskId:string,channel:string|null,before?:string|
 }
 
 /** Rechecks trusted identity and current channel membership for every history request. */
-export async function loadMessagePage(taskId:string,channelMemberId?:string|null,before?:string|null):Promise<MessagePage> {
-  const access=await messageAccess(taskId);
+export async function loadMessagePage(taskId:string,channelMemberId?:string|null,before?:string|null) {
   const channel=selectedChannel(channelMemberId);
+  const access=await messageAccess(taskId,channel);
   if(!permittedChannel(access,channel))throw new MessagePageError("Диалог недоступен.",403);
-  return readMessagePage(taskId,channel,before);
+  const member=access.channels.find(item=>item.id===channel);
+  return {...await readMessagePage(taskId,channel,before),canWrite:!member?.removedAt&&canWriteChannel(access.viewer,channel)};
 }
 export type ScheduleRow = ScheduleEntry & {id:string; planTaskId:string; version:number};
 export type ScheduleWorkloadRow = ScheduleRow & {hoursPerDay:number};
@@ -101,11 +112,11 @@ export const workloadSelect = `SELECT s.id,s.plan_task_id AS planTaskId,s.task_i
   WHERE t.deleted_at IS NULL AND p.deleted_at IS NULL AND t.kind='leaf' AND t.status<>'done'`;
 
 export async function loadTaskCollaboration(node:TaskNode,_viewer:AccessContext,channelMemberId?:string) {
-  const access=await messageAccess(node.id);
-  const {channels}=access;
   const selected=selectedChannel(channelMemberId);
+  const access=await messageAccess(node.id,selected,true);
+  const {channels}=access;
   const page=permittedChannel(access,selected)?await readMessagePage(node.id,selected):{messages:[] as ChatMessage[],hasMore:false,beforeCursor:null};
-  const db=getD1();
+  const db=await getD1();
   const entries=await db.prepare(`${scheduleSelect} AND s.plan_task_id=? ORDER BY s.start_date,s.member_id,s.id`).bind(node.id).all<ScheduleRow>();
   const plan=await db.prepare("SELECT version FROM schedule_plans WHERE task_id=?").bind(node.id).first<{version:number}>();
   return {channels,messages:page.messages,messagePage:{hasMore:page.hasMore,beforeCursor:page.beforeCursor},entries:entries.results,scheduleVersion:plan?.version??0};

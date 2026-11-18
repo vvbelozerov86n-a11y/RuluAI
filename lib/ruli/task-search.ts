@@ -1,4 +1,4 @@
-import {ROOT_ID,isISODate,isOverdue,isTaskStatus,type TaskNode} from "./model.ts";
+import {ROOT_ID,isISODate,isTaskStatus,type TaskNode} from "./model.ts";
 
 export type TaskFilters={q?:string;owner?:string;status?:string;late?:string;due?:string};
 export type TaskEntry={node:TaskNode;path:TaskNode[]};
@@ -35,20 +35,29 @@ function isUnfinishedEntry({node,path}:TaskEntry):boolean {
   return node.kind!=="group"||taskEntries(node).some(entry=>entry.node.kind==="leaf"&&entry.node.status!=="done");
 }
 
-/** Prefer a task's own expired deadline, otherwise the nearest expired group. */
+/** Own/nearest expired date wins; otherwise use the earliest upcoming deadline. */
+export function taskDeadlineSource(entry:TaskEntry,today:string):TaskNode|null {
+  if(!isISODate(today)||!isUnfinishedEntry(entry))return null;
+  const ancestors=entry.path.slice(0,-1).reverse().filter(node=>node.kind==="group");
+  let upcoming:TaskNode|null=null;
+  for(const candidate of [entry.node,...ancestors]){
+    const date=candidate.dueDate;
+    if(!isISODate(date))continue;
+    if(date<today)return candidate;
+    if(!upcoming?.dueDate||date<upcoming.dueDate)upcoming=candidate;
+  }
+  return upcoming;
+}
+
 export function overdueSource(entry:TaskEntry,today:string):TaskNode|null {
-  const {node,path}=entry;
-  if(!isUnfinishedEntry(entry))return null;
-  if(isOverdue(node,today))return node;
-  return path.slice(0,-1).reverse().find(ancestor=>ancestor.kind==="group"&&isOverdue(ancestor,today))??null;
+  const source=taskDeadlineSource(entry,today);
+  return source?.dueDate&&source.dueDate<today?source:null;
 }
 
 /** Earlier expired deadlines take precedence over a task or group deadline today. */
 export function dueTodaySource(entry:TaskEntry,today:string):TaskNode|null {
-  const {node,path}=entry;
-  if(!isISODate(today)||!isUnfinishedEntry(entry)||overdueSource(entry,today))return null;
-  if(node.dueDate===today)return node;
-  return path.slice(0,-1).reverse().find(ancestor=>ancestor.kind==="group"&&ancestor.dueDate===today)??null;
+  const source=taskDeadlineSource(entry,today);
+  return source?.dueDate===today?source:null;
 }
 
 function matches(entry:TaskEntry,filters:TaskFilters,today:string):boolean {

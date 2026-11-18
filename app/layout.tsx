@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { getChatGPTUser } from "./chatgpt-auth";
+import { HeaderAuth } from "@/components/ruli/header-auth";
 import "./globals.css";
 import "./ruli.css";
 
@@ -50,30 +51,15 @@ export default async function RootLayout({
             </span>
             рули<span className="brand-dot">.</span>
           </Link>
-          <span className="workspace-label">Моя команда</span>
+          {user && <span className="workspace-label">Моя команда</span>}
           <div className="topbar-right">
-            <span className="prototype-label">Рабочая версия</span>
-            <Link className="team-button" href="/team" aria-label="Сотрудники и боты">
+            {user && <Link className="team-button" href="/team" aria-label="Сотрудники и боты">
               <span className="team-button-label">Сотрудники и боты</span>
-              {user ? (
-                <span className="avatar small" title={user.email}>
-                  {initialsOf(user.fullName || user.displayName)}
-                </span>
-              ) : (
-                <span className="avatar small" title="Команда">
-                  ВЫ
-                </span>
-              )}
-            </Link>
-            {user ? (
-              <a className="auth-link" href={`/signout-with-chatgpt?return_to=/`}>
-                Выйти
-              </a>
-            ) : (
-              <a className="auth-link" href={`/signin-with-chatgpt?return_to=/`}>
-                Войти
-              </a>
-            )}
+              <span className="avatar small" title={user.email}>
+                {initialsOf(user.fullName || user.displayName)}
+              </span>
+            </Link>}
+            <HeaderAuth signedIn={Boolean(user)} />
           </div>
         </header>
         {children}

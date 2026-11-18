@@ -312,9 +312,11 @@ test("home never fetches root deliveries while group and task pages expose only 
         "@/components/ruli/views": { GroupView: "group-view", DetailView: "detail-view" },
         "@/lib/ruli/data": { getMembers: async () => [], loadTree: async () => node },
         "@/lib/ruli/access": { canManage, requireAccess: async () => ({ role }) },
+        "@/app/chatgpt-auth": { getChatGPTUser: async () => ({ userId:"test" }) },
+        "@/lib/ruli/company-profile": { getManagerCompanyProfile: async () => ({name:"Команда"}) },
         "@/lib/ruli/model": { taskHref: id => `/t/${id}`, todayISO: () => "2026-11-18", findPath: () => [node] },
         "@/lib/ruli/agent-runtime": { listTaskDeliveries: async (_db, id) => { calls.push(id); return [delivery("failed-private", "failed")]; } },
-        "@/db": { getD1: () => ({}) },
+        "@/db": { getD1: () => ({}), getCurrentWorkspaceId: async () => "legacy" },
       } });
       const { default: Page } = h.load(kind === "root" ? "app/page.tsx" : "app/t/[id]/page.tsx");
       const element = await Page({ params: Promise.resolve({ id: node.id }), searchParams: Promise.resolve({}) });

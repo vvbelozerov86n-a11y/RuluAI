@@ -1,4 +1,4 @@
-.team-management .team-section-nav { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin:24px 0; }
+.team-management .team-section-nav { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin:24px 0; }
 .team-management .team-section-nav a { display:flex; flex-direction:column; gap:7px; padding:17px; border:1px solid #617d79; border-radius:10px; background:#223d3c; color:#e1eee4; text-decoration:none; }
 .team-management .team-section-nav a:hover { background:#2b4a44; border-color:#a1c8ab; }
 .team-management .team-section-nav strong { font-size:15px; line-height:1.4; }
@@ -28,6 +28,17 @@
 .team-management .team-email-correction form { max-width:480px; }
 .team-management .editor-panel .team-access .form-error { color:#ffb8a7; }
 .team-management .team-people { border-top:1px solid #47636a; padding-top:24px; margin-top:28px; }
+.team-management #team-people { scroll-margin-top:20px; }
+.team-management .team-person { display:grid; grid-template-columns:auto minmax(0,1fr) auto; }
+.team-management .team-person-name { overflow-wrap:anywhere; }
+.team-management .team-remove-trigger { min-height:44px; padding:7px 12px; border:1px solid #805e58; border-radius:6px; color:#f3c2b7; background:transparent; }
+.team-management .team-remove-trigger:hover { background:#392e2f; }
+.team-management .team-remove-confirm { grid-column:1/-1; min-width:0; margin:0; overflow-wrap:anywhere; }
+.team-management .team-remove-confirm h3 { margin:0; font-size:16px; color:#f8e6df; }
+.team-management .editor-panel .team-remove-confirm p { margin:8px 0; color:#e4ccc3; }
+.team-management .editor-panel .team-remove-confirm .form-error { color:#ffb8a7; }
+.team-management .team-remove-confirm .dialog-actions { flex-wrap:wrap; gap:8px; margin:14px 0 0; }
+.team-management .team-remove-confirm button { min-height:44px; white-space:normal; }
 .team-management .ai-create { padding:20px; margin:22px 0; scroll-margin-top:24px; }
 .team-management .ai-create h3 { font-size:19px; margin:0 0 10px; }
 .team-management .team-section-nav a:focus-visible,.team-management .team-signin-actions :is(a,button):focus-visible { outline:3px solid #bad29c; outline-offset:3px; }

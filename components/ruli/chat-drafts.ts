@@ -2,11 +2,13 @@ export type ChatDraft = {body: string; clientId: string; botMemberId?: string};
 function savedRecipient(value: unknown): Pick<ChatDraft, "botMemberId"> {
   return typeof value === "string" && /^[a-zA-Z0-9_-]{1,120}$/.test(value) ? {botMemberId:value} : {};
 }
-export type DraftContext = {viewerUserId: string; taskId: string; channelMemberId?: string};
+export type DraftContext = {workspaceId?: string; viewerUserId: string; taskId: string; channelMemberId?: string};
 
 export function draftStorageKey(context: DraftContext): string {
-  return "ruli:chat-draft:v2:" + [context.viewerUserId, context.taskId, context.channelMemberId || "general"]
-    .map(encodeURIComponent).join(":");
+  const channelKey = [context.viewerUserId, context.taskId, context.channelMemberId || "general"].map(encodeURIComponent).join(":");
+  // Drafts written before company registration belong to the original workspace.
+  if (!context.workspaceId || context.workspaceId === "legacy") return "ruli:chat-draft:v2:" + channelKey;
+  return `ruli:chat-draft:v3:${encodeURIComponent(context.workspaceId)}:${channelKey}`;
 }
 
 export function readDraft(raw: string | null, fallbackClientId: string): ChatDraft {

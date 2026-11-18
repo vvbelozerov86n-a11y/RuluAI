@@ -126,7 +126,7 @@ export function collaborationHarness() {
   seedTask("help", { parentId: "service" });
 
   const access = loadModule("lib/ruli/access.ts", {
-    ...policy, env, cache: (fn) => fn, getD1: () => db, initRuli: async () => {},
+    ...policy, env, cache: (fn) => fn, getD1: () => db, getCurrentWorkspaceId: async () => "legacy", initRuli: async () => {},
     requireChatGPTUser: async () => {
       if (!identity) throw new TestRedirect("/signin-with-chatgpt");
       return { ...identity, displayName: identity.email, fullName: null };
@@ -134,7 +134,7 @@ export function collaborationHarness() {
   }, ["requireAccess", "requireManager", "listAccessAccounts"]);
 
   async function getMembers() {
-    return sqlite.prepare("SELECT id,name,short_name AS shortName,role,initials,color,type FROM members").all().map((row) => ({ ...row }));
+    return sqlite.prepare("SELECT id,name,short_name AS shortName,role,initials,color,type FROM members WHERE removed_at IS NULL").all().map((row) => ({ ...row }));
   }
   async function loadTree() {
     const rows = sqlite.prepare("SELECT * FROM tasks WHERE deleted_at IS NULL").all();

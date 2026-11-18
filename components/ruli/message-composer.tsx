@@ -9,8 +9,8 @@ import {formatQuote} from "./chat-message-utils";
 import type {TaskBot} from "@/lib/ruli/ai";
 import "./message-composer.css";
 
-export function MessageComposer({taskId,channelMemberId="",viewerUserId,clientId,mode,bots=[],privateBot,aiDisabledReason}:{
-  taskId:string;channelMemberId?:string;viewerUserId:string;clientId:string;mode:string;bots?:TaskBot[];privateBot?:TaskBot;aiDisabledReason?:string|null;
+export function MessageComposer({workspaceId,taskId,channelMemberId="",viewerUserId,clientId,mode,bots=[],privateBot,aiDisabledReason}:{
+  workspaceId?:string;taskId:string;channelMemberId?:string;viewerUserId:string;clientId:string;mode:string;bots?:TaskBot[];privateBot?:TaskBot;aiDisabledReason?:string|null;
 }) {
   const [quoteError,setQuoteError]=useState("");
   const [accessError,setAccessError]=useState("");
@@ -20,7 +20,7 @@ export function MessageComposer({taskId,channelMemberId="",viewerUserId,clientId
   const formRef=useRef<HTMLFormElement>(null);
   const modelBots=bots.filter(item=>item.kind!=="agent");
   const generalAgents=!channelMemberId&&bots.some(item=>item.kind==="agent");
-  const storageKey=draftStorageKey({viewerUserId,taskId,channelMemberId});
+  const storageKey=draftStorageKey({workspaceId,viewerUserId,taskId,channelMemberId});
   const store=useMemo(()=>getDraftStore(storageKey,clientId),[storageKey,clientId]);
   const {draft,persistent,unsent=[]}=useSyncExternalStore(store.subscribe,store.getSnapshot,store.getServerSnapshot);
   const selectedBot=channelMemberId?"":draft.botMemberId??"";
