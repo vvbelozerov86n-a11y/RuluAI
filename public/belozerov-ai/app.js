@@ -35,11 +35,17 @@
     // The form prepares a message in the visitor's mail application. It never
     // submits personal information to a server or claims a message was sent.
     const dialog = $('#brief-dialog');
+    const intro = $('.dialog-intro');
+    const generalIntro = intro?.textContent;
     const form = $('#brief-form');
     const status = $('#brief-status');
     const closeButton = $('#brief-close');
     let returnFocus = null;
     const field = (name) => form?.elements.namedItem(name);
+    const demoRequest = 'Хочу посмотреть демонстрацию Криппи';
+    const task = field('task');
+    let demoMode = false;
+    let suggestedTask = false;
     const setStatus = (message) => {
       if (status) status.textContent = message;
     };
@@ -52,22 +58,47 @@
       }
     };
 
+    const setDemoMode = (active) => {
+      demoMode = active;
+      if (intro) intro.textContent = active
+        ? 'Оставьте имя и контакт для показа Криппи. Подробности можно добавить по желанию.'
+        : generalIntro;
+      if (!task) return;
+      if (!active) {
+        if (suggestedTask && task.value === demoRequest) task.value = '';
+        suggestedTask = false;
+      } else if (!task.value.trim()) {
+        task.value = demoRequest;
+        suggestedTask = true;
+      }
+      task.required = !active;
+      task.minLength = active ? 0 : 10;
+      task.setCustomValidity('');
+    };
+
     if (dialog) {
+      const openBrief = (button, requestDemo) => {
+        returnFocus = button.closest('#mobile-menu') ? menuToggle : button;
+        setMenuOpen(false);
+        setStatus('');
+        setDemoMode(requestDemo);
+        const topic = field('topic');
+        const requestedTopic = requestDemo ? 'krippi' : button.dataset.topic;
+        if (topic && requestedTopic && [...topic.options].some((option) => option.value === requestedTopic)) {
+          topic.value = requestedTopic;
+        } else if (topic && !task?.value.trim()) {
+          topic.value = 'other';
+        }
+        if (!dialog.open) {
+          if (typeof dialog.showModal === 'function') dialog.showModal();
+          else dialog.setAttribute('open', '');
+        }
+        requestAnimationFrame(() => field('name')?.focus());
+      };
       $$('[data-open-brief]').forEach((button) => {
         button.addEventListener('click', (event) => {
           event.preventDefault();
-          returnFocus = button.closest('#mobile-menu') ? menuToggle : button;
-          setMenuOpen(false);
-          setStatus('');
-          const topic = field('topic');
-          if (topic && button.dataset.topic && [...topic.options].some((option) => option.value === button.dataset.topic)) {
-            topic.value = button.dataset.topic;
-          }
-          if (!dialog.open) {
-            if (typeof dialog.showModal === 'function') dialog.showModal();
-            else dialog.setAttribute('open', '');
-          }
-          requestAnimationFrame(() => field('name')?.focus());
+          openBrief(button, false);
         });
       });
       closeButton?.addEventListener('click', closeDialog);
@@ -83,31 +114,28 @@
       // A visitor who chose the Krippi consultation arrives at the existing brief.
       const requestedTopic = new URLSearchParams(window.location.search).get('topic');
       if (requestedTopic === 'krippi' && window.location.hash === '#contact') {
-        const topic = field('topic');
         const contactButton = $('#contact [data-open-brief]');
-        if (topic && contactButton) {
-          topic.value = requestedTopic;
-          contactButton.click();
-        }
+        if (contactButton) openBrief(contactButton, true);
       }
     }
 
     const messageFromForm = () => {
       const value = (name) => String(field(name)?.value || '').trim();
       const topic = field('topic')?.selectedOptions[0]?.textContent || 'Автоматизация';
+      const details = value('task');
+      const request = demoMode ? demoRequest : 'Хочу обсудить автоматизацию.';
+      const requestInDetails = demoMode && details.includes(demoRequest);
       return {
-        subject: `Запрос на автоматизацию — ${topic}`,
+        subject: demoMode ? 'Запрос на демонстрацию Криппи' : `Запрос на автоматизацию — ${topic}`,
         body: [
           'Владислав, здравствуйте!',
           '',
-          'Хочу обсудить автоматизацию.',
+          requestInDetails ? details : request,
           '',
           `Имя: ${value('name')}`,
           `Контакт для ответа: ${value('contact')}`,
           `Направление: ${topic}`,
-          '',
-          'Моя задача:',
-          value('task'),
+          ...(details && !requestInDetails ? ['', demoMode ? 'Дополнительные детали:' : 'Моя задача:', details] : []),
         ].join('\n'),
       };
     };
@@ -117,6 +145,7 @@
       ['name', 'contact', 'task'].forEach((name) => {
         const input = field(name);
         if (!input) return;
+        if (name === 'task' && demoMode) return;
         const value = input.value.trim();
         let error = !value ? 'Пожалуйста, заполните это поле.' : '';
         if (!error && name === 'task' && value.length < 10) error = 'Опишите задачу подробнее — хотя бы 10 символов.';
@@ -131,10 +160,14 @@
       return form.reportValidity();
     };
     form?.addEventListener('input', (event) => {
+      if (event.target === task) suggestedTask = false;
       event.target.setCustomValidity?.('');
       setStatus('');
     });
-    form?.addEventListener('change', () => setStatus(''));
+    form?.addEventListener('change', (event) => {
+      if (demoMode && event.target === field('topic') && event.target.value !== 'krippi') setDemoMode(false);
+      setStatus('');
+    });
     form?.addEventListener('submit', (event) => {
       event.preventDefault();
       if (!validateForm()) return;

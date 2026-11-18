@@ -325,7 +325,7 @@ test("guest homepage opens the standalone showcase and sign-in restores only sup
   assert.match(html, /<a\b[^>]*\bhref="\/ruli"/i);
   assert.match(html, /<a\b[^>]*\bhref="\/krippi"/i);
   assert.match(html, /\bid="contact"/);
-  const registration = /<a\b[^>]*href="\/register" target="_top"[^>]*>Регистрация компании/;
+  const registration = /<a\b[^>]*href="\/register" target="_top"[^>]*>Регистрация компании в Рули/;
   const header = html.match(/<header\b[\s\S]*?<\/header>/)?.[0] ?? "";
   const mobileMenu = header.match(/<nav id="mobile-menu"[^>]*>[\s\S]*?<\/nav>/)?.[0] ?? "";
   const hero = html.match(/<section class="hero container"[^>]*>[\s\S]*?<\/section>/)?.[0] ?? "";

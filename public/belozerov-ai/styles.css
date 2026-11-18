@@ -13,6 +13,20 @@
 
 :root { --caption-ink: #596550; }
 
+.form-alternative {
+  flex-wrap: wrap;
+  gap: 0 10px;
+  font-size: 14px;
+  line-height: 1.5;
+  text-align: center;
+}
+.form-alternative button {
+  min-height: 44px;
+  padding: 8px 10px;
+  font-size: inherit;
+  line-height: inherit;
+}
+
 .hero-note, .flow-float-top, .flow-float-labels, .visual-caption,
 .integration-label, .integration-end, .platform, .section-kicker,
 .card-number, .section-footnote, .process-number, .about-person div > span,
@@ -46,8 +60,20 @@
     gap: 6px 12px;
     padding-block: 6px;
   }
-  .workspace-actions { grid-column: 1 / -1; }
-  .workspace-actions .button { flex: 1; font-size: 13px; padding-inline: 8px; }
+  .workspace-actions {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+    align-items: stretch;
+  }
+  .workspace-actions .button {
+    min-width: 0;
+    padding: 4px 8px;
+    font-size: 13px;
+    white-space: normal;
+    text-align: center;
+    text-wrap: balance;
+  }
   .mobile-menu:not([hidden]) { top: 100%; max-height: calc(100dvh - 104px); overflow-y: auto; }
   .hero-actions .button { font-size: 14px; }
 }
