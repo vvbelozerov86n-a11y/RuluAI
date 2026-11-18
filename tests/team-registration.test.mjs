@@ -67,6 +67,7 @@ function pageHarness(role="manager",company=savedCompany,user=signedIn,actionSta
     "@/lib/ruli/access":{requireAccess:async()=>({role,memberId:"me"}),requireManager:async()=>{assert.equal(role,"manager");return {displayName:"Руководитель"};},canManage:viewer=>viewer.role==="manager",listAccessAccounts:async()=>[{memberId:"me",email:"owner@example.test",role:"manager",userId:"owner",name:"Owner"},{memberId:"manager2",email:"manager2@example.test",role:"manager",userId:"second",name:"Second manager"},{memberId:"linked",email:"linked@example.test",role:"executor",userId:null,name:"Linked"}]},
     "@/app/chatgpt-auth":{chatGPTSignInPath:path=>"/signin-with-chatgpt?return_to="+encodeURIComponent(path),chatGPTSignOutPath:path=>"/signout-with-chatgpt?return_to="+encodeURIComponent(path),getChatGPTUser:async()=>user},
     "@/lib/ruli/company-profile":{
+      canOpenCurrentTeam:async currentUser=>{assert.ok(user);assert.equal(currentUser,user);return role!=="new";},
       getCompanyRegistrationAccess:async()=>{assert.ok(user);return role==="new"?{kind:"new"}:role==="manager"?{kind:"manager",displayName:"Руководитель",registered:Boolean(company)}:{kind:"member"};},
       getCurrentCompanyName:async()=>company?.name??null,
       getManagerCompanyProfile:async()=>{assert.equal(role,"manager");return company;},
@@ -79,9 +80,10 @@ function pageHarness(role="manager",company=savedCompany,user=signedIn,actionSta
     "@/app/ai-actions":{saveBotState:()=>{},testAiConnectionState:()=>{}},
     "@/components/ruli/ui":{Avatar:()=>null},
     "@/components/ruli/views":{Toasts:()=>null},
-    "next/link":{__esModule:true,default:props=>React.createElement("a",props)},
-    "next/navigation":{redirect:url=>{throw new TestRedirect(url);}},
+    "next/link":{__esModule:true,default:props=>React.createElement("a",{...props,"data-router-link":true})},
+    "next/navigation":{redirect:url=>{throw new TestRedirect(url);},usePathname:()=>"/register",useSearchParams:()=>new URLSearchParams()},
   };
+  imports["./chatgpt-auth"]=imports["@/app/chatgpt-auth"];
   const cache=new Map();
   function load(relative) {
     let filename=path.resolve(project,relative);
@@ -130,6 +132,30 @@ test("non-managers see the team without registration controls or account email d
   }
 });
 
+test("the shared header offers team navigation only to members and preserves the sign-in state",async()=>{
+  const layout="app/layout.tsx";
+  const guest=await pageHarness("new",null,null)(layout);
+  const newUser=await pageHarness("new",null)(layout);
+  for(const html of [guest,newUser]) {
+    const brand=html.match(/<a\b[^>]*class="brand"[^>]*>/)?.[0]??"";
+    assert.match(brand,/href="\/vitrina"/);
+    assert.match(brand,/aria-label="Рули — на главную"/);
+    assert.doesNotMatch(brand,/data-router-link/);
+    assert.doesNotMatch(html,/href="\/team"|Моя команда|Сотрудники и боты|reader@example\.test/);
+  }
+  assert.match(guest,/href="\/signin-with-chatgpt\?/);
+  assert.match(newUser,/href="\/signout-with-chatgpt\?/);
+  for(const role of ["manager","executor","viewer"]) {
+    const html=await pageHarness(role)(layout);
+    const brand=html.match(/<a\b[^>]*class="brand"[^>]*>/)?.[0]??"";
+    assert.match(brand,/href="\/"/);
+    assert.match(brand,/aria-label="Рули — все задачи"/);
+    assert.match(brand,/data-router-link/);
+    assert.match(html,/href="\/team"/);
+    assert.match(html,/Моя команда/);
+  }
+});
+
 test("a manager follows registration from the team, and can then find their invitation again",async()=>{
   const team=await pageHarness("manager",null)();
   assert.match(team,/href="\/register"/);assert.match(team,/Зарегистрировать компанию/);assert.doesNotMatch(team,/test-invite-token/);
@@ -141,6 +167,7 @@ test("a manager follows registration from the team, and can then find their invi
   assert.match(form,/name="companyName"/);assert.match(form,/name="managerName"/);assert.match(form,/Анна Тест/);
   const separate=await pageHarness("new")(register);
   assert.match(separate,/name="companyName"/);assert.doesNotMatch(separate,/Компания Тест|test-invite-token/);
+  assert.match(separate,/<a[^>]*href="\/vitrina"[^>]*>← На главную<\/a>/);
   const member=await pageHarness("viewer")(register);
   assert.match(member,/Открыть свою команду/);assert.doesNotMatch(member,/name="companyName"|test-invite-token/);
   await assert.rejects(pageHarness()(register),error=>error instanceof TestRedirect&&error.url==="/team#company-invite");

@@ -132,6 +132,25 @@ test("combined owner, status, text and deadline filters narrow to the same task"
   assert.deepEqual(searchTasks(tree,{owner:"missing"},today),[]);
 });
 
+test("selecting both deadlines includes either category while other filters still narrow the result",()=>{
+  const review={title:"Отчёт",status:"review"};
+  const tree=group("root",[
+    group("late-project",[
+      leaf("inherited-overdue",{...review,dueDate:today}),
+      leaf("other-owner",{...review,ownerId:"max"}),
+    ],{dueDate:"2026-11-17"}),
+    leaf("due-today",{...review,dueDate:today}),
+    leaf("other-text",{status:"review",title:"Счёт",dueDate:today}),
+    leaf("other-status",{title:"Отчёт",dueDate:today}),
+    leaf("future",{...review,dueDate:"2026-11-19"}),
+    leaf("no-deadline",review),
+    leaf("finished",{...review,status:"done",dueDate:today}),
+  ]);
+  const deadlines={late:"1",due:"today"};
+  assert.deepEqual(ids(searchTasks(tree,deadlines,today)),["inherited-overdue","other-owner","due-today","other-text","other-status"]);
+  assert.deepEqual(ids(searchTasks(tree,{...deadlines,q:"отчёт",owner:"anna",status:"review"},today)),["inherited-overdue","due-today"]);
+});
+
 test("empty and unsupported filters do not accidentally hide the normal overview",()=>{
   assert.equal(hasTaskFilters({q:" \n ",status:"unknown",late:"false",due:"tomorrow"}),false);
   assert.deepEqual(normalizeTaskFilters({q:"  рынок  ",owner:" anna ",status:"review",late:"1",due:"today"}),{q:"рынок",owner:"anna",status:"review",late:"1",due:"today"});

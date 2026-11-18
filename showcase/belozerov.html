@@ -34,11 +34,18 @@
   <header id="site-header" class="site-header">
     <div class="container header-inner">
       <a class="brand" href="#" aria-label="Belozerov AI — главная"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><span>belozerov<span class="brand-ai">.ai</span></span></a>
-      <nav class="desktop-nav" aria-label="Основная навигация"><a href="#solutions">Решения</a><a href="#how">Как работаем</a><a href="#about">Обо мне</a><a href="#faq">Вопросы</a></nav>
-      <a class="button button-small button-dark workspace-login" href="/signin-with-chatgpt?return_to=%2F" target="_top">Войти в Рули</a>
       <button id="menu-toggle" class="menu-toggle" aria-controls="mobile-menu" aria-expanded="false" aria-label="Открыть меню"><span></span><span></span></button>
+      <nav class="desktop-nav" aria-label="Основная навигация"><a href="#solutions">Решения</a><a href="#how">Как работаем</a><a href="#about">Обо мне</a><a href="#faq">Вопросы</a></nav>
+      <div class="workspace-actions">
+        <a class="button button-small workspace-login" href="/signin-with-chatgpt?return_to=%2F" target="_top">Войти в Рули</a>
+        <a class="button button-small button-dark" href="/register" target="_top">Регистрация компании</a>
+      </div>
     </div>
-    <nav id="mobile-menu" class="mobile-menu" aria-label="Мобильная навигация" hidden><a href="#solutions">Решения</a><a href="#how">Как работаем</a><a href="#about">Обо мне</a><a href="#faq">Вопросы</a><button class="button button-dark" data-open-brief>Обсудить задачу <svg focusable="false" aria-hidden="true"><use href="#i-up"/></svg></button></nav>
+    <nav id="mobile-menu" class="mobile-menu" aria-label="Мобильная навигация" hidden>
+      <a href="/register" target="_top">Регистрация компании</a>
+      <a href="#solutions">Решения</a><a href="#how">Как работаем</a><a href="#about">Обо мне</a><a href="#faq">Вопросы</a>
+      <button class="button button-dark" data-open-brief>Обсудить задачу <svg focusable="false" aria-hidden="true"><use href="#i-up"/></svg></button>
+    </nav>
   </header>
 
   <main id="main">
@@ -47,9 +54,10 @@
         <div class="eyebrow"><span class="status-dot"></span> АВТОМАТИЗАЦИЯ МАРКЕТПЛЕЙСОВ И БИЗНЕСА</div>
         <h1 id="hero-title">Ваш бизнес.<br>Без лишней<br><span class="title-accent">рутины<svg focusable="false" viewBox="0 0 330 18" aria-hidden="true"><path d="M4 13C101 0 216 1 326 9"/></svg></span><span class="title-period">.</span></h1>
         <p class="hero-description">Связываю сервисы, автоматизирую отчёты, заявки и контент. Чтобы вы занимались развитием, а повторяющиеся задачи выполняла система.</p>
+        <p class="workspace-intro">В <strong>«Рули»</strong> вы ставите задачи сотрудникам и принимаете результаты.</p>
         <div class="hero-actions">
+          <a class="button workspace-register" href="/register" target="_top">Регистрация компании <svg focusable="false" aria-hidden="true"><use href="#i-arrow"/></svg></a>
           <button class="button button-dark" data-open-brief>Обсудить мою задачу <svg focusable="false" aria-hidden="true"><use href="#i-up"/></svg></button>
-          <a class="text-link workspace-register" href="/register" target="_top">Регистрация компании <svg focusable="false" aria-hidden="true"><use href="#i-arrow"/></svg></a>
         </div>
         <div class="hero-note"><span class="mini-icon"><svg focusable="false" aria-hidden="true"><use href="#i-check"/></svg></span><span>Начнём с одного процесса.<br><strong>Проверим результат на ваших задачах.</strong></span></div>
       </div>
@@ -61,7 +69,7 @@
       </div>
     </section>
 
-    <div class="integration-strip"><div class="container integration-inner"><span class="integration-label">Соединяем инструменты<br>в понятный процесс</span><span class="platform platform-wb">Wildberries</span><span class="platform platform-ozon">Ozon</span><span class="platform">Таблицы</span><span class="platform">CRM</span><span class="platform">Мессенджеры</span><span class="integration-end">+ ваши сервисы <svg focusable="false" aria-hidden="true"><use href="#i-up"/></svg></span></div></div>
+    <div class="integration-strip"><div class="container integration-inner"><span class="integration-label">Соединяем инструменты<br> в понятный процесс</span><span class="platform platform-wb">Wildberries</span><span class="platform platform-ozon">Ozon</span><span class="platform">Таблицы</span><span class="platform">CRM</span><span class="platform">Мессенджеры</span><span class="integration-end">+ ваши сервисы <svg focusable="false" aria-hidden="true"><use href="#i-up"/></svg></span></div></div>
 
     <section id="solutions" class="section container">
       <div class="section-heading"><div><span class="eyebrow section-kicker">01 / РЕШЕНИЯ</span><h2>Меньше действий.<br>Больше возможностей.</h2></div><p>Находим повторяющуюся задачу<br class="desktop-break"> и превращаем её в работающий процесс.</p></div>

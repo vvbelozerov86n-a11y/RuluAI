@@ -22,10 +22,11 @@ function harness(t) {
     getD1:async()=>workspaceDatabase(h.db, await getCurrentWorkspaceId()), getSystemD1:()=>h.db,
     lookupIdentityWorkspace, workspaceDatabase, workspaceSchemaStatements, workspaceDirectoryTriggers, createInviteToken:randomUUID };
   const access = loadModule("lib/ruli/access.ts", deps, ["requireManager","requireAccess"]);
-  const profile = loadModule("lib/ruli/company-profile.ts", {...deps,...access}, ["getManagerCompanyProfile", "getCompanyRegistrationAccess", "getCurrentCompanyName"]);
+  const profile = loadModule("lib/ruli/company-profile.ts", {...deps,...access}, ["getManagerCompanyProfile", "getCompanyRegistrationAccess", "getCurrentCompanyName", "canOpenCurrentTeam"]);
   const { registerCompanyState } = loadModule("app/company-actions.ts", {...deps,...profile}, ["registerCompanyState"]);
   return { ...h, profile: profile.getManagerCompanyProfile, registration:profile.getCompanyRegistrationAccess,
-    access, getCurrentWorkspaceId, as: key => {identity = typeof key === "string" ? h.identities[key] : key;},
+    access, getCurrentWorkspaceId, canOpenTeam: () => profile.canOpenCurrentTeam(identity),
+    as: key => {identity = typeof key === "string" ? h.identities[key] : key;},
     register: (values = data) => registerCompanyState({}, makeForm(values)) };
 }
 
@@ -113,6 +114,20 @@ test("global account uniqueness survives OR IGNORE and existing companies keep s
   const nextToken=randomUUID();
   await local.prepare("UPDATE company_profile SET invite_token=?").bind(nextToken).run();
   assert.equal(h.one("SELECT invite_token FROM workspaces WHERE id=?",id).invite_token, nextToken);
+});
+
+test("team navigation allows an unclaimed legacy owner seat without assigning it to the viewer", async t => {
+  const h = harness(t);
+  h.as("stranger");
+  assert.equal(await h.canOpenTeam(), false);
+  h.env.RULI_OWNER_EMAIL = h.identities.stranger.email;
+  assert.equal(await h.canOpenTeam(), false);
+  assert.equal(h.one("SELECT user_id FROM team_accounts WHERE member_id='me'").user_id, h.identities.manager.userId);
+  h.sqlite.exec("DELETE FROM team_accounts WHERE member_id='me'");
+  assert.equal(await h.canOpenTeam(), true);
+  assert.equal(h.one("SELECT user_id FROM team_accounts WHERE member_id='me'"), null);
+  h.as("anna");
+  assert.equal(await h.canOpenTeam(), true);
 });
 
 test("the configured unbound legacy owner claims the existing workspace and preserves its tree", async t => {

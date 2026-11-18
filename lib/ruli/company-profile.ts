@@ -1,8 +1,22 @@
 import { env } from "cloudflare:workers";
-import { requireChatGPTUser } from "../../app/chatgpt-auth";
-import { getD1, getSystemD1 } from "../../db";
-import { lookupIdentityWorkspace } from "../../db/workspace-storage";
+import { requireChatGPTUser, type ChatGPTUser } from "../../app/chatgpt-auth";
+import { getCurrentWorkspaceId, getD1, getSystemD1 } from "../../db";
 import { requireAccess, requireManager } from "./access";
+
+export async function canOpenCurrentTeam(user: ChatGPTUser): Promise<boolean> {
+  const workspaceId = await getCurrentWorkspaceId();
+  if (!workspaceId) return false;
+  const email = user.email.trim().toLowerCase();
+  if (workspaceId !== "legacy" || email !== env.RULI_OWNER_EMAIL?.trim().toLowerCase()) return true;
+
+  // The configured address can claim an empty owner seat, but changing the
+  // setting does not entitle a different account to an occupied seat.
+  const eligible = await getSystemD1().prepare(`SELECT 1 WHERE
+    NOT EXISTS (SELECT 1 FROM team_accounts WHERE member_id='me')
+    OR EXISTS (SELECT 1 FROM team_accounts WHERE user_id=? OR (user_id IS NULL AND email=?))`)
+    .bind(user.userId, email).first();
+  return Boolean(eligible);
+}
 
 export async function getManagerCompanyProfile() {
   await requireManager("/register");
@@ -17,9 +31,8 @@ export async function getCurrentCompanyName(): Promise<string | null> {
 }
 
 export async function getCompanyRegistrationAccess() {
-  const user = await requireChatGPTUser("/register");
-  const workspaceId = await lookupIdentityWorkspace(getSystemD1(), user, env.RULI_OWNER_EMAIL);
-  if (!workspaceId) return { kind: "new" } as const;
+  await requireChatGPTUser("/register");
+  if (!await getCurrentWorkspaceId()) return { kind: "new" } as const;
   const viewer = await requireAccess("/register");
   if (viewer.role !== "manager") return { kind: "member" } as const;
   const profile = await (await getD1()).prepare("SELECT id FROM company_profile WHERE id='workspace'").first();

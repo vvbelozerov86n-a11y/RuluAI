@@ -65,8 +65,12 @@ function matches(entry:TaskEntry,filters:TaskFilters,today:string):boolean {
   // Lifecycle and deadline filters identify actionable tasks, not their ancestors.
   if((filters.status||filters.late||filters.due)&&node.kind!=="leaf")return false;
   if(filters.status&&node.status!==filters.status)return false;
-  if(filters.late&&!overdueSource(entry,today))return false;
-  if(filters.due&&!dueTodaySource(entry,today))return false;
+  if(filters.late||filters.due){
+    const deadline=taskDeadlineSource(entry,today)?.dueDate;
+    if(!deadline)return false;
+    const matchesDeadline=(filters.late&&deadline<today)||(filters.due&&deadline===today);
+    if(!matchesDeadline)return false;
+  }
   if(filters.owner&&node.ownerId!==filters.owner)return false;
   return !filters.q||[node.title,node.description,node.result].join(" ").toLocaleLowerCase("ru").includes(filters.q.toLocaleLowerCase("ru"));
 }

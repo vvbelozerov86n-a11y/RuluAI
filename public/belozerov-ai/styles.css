@@ -11,9 +11,46 @@
 .solution-card>p{color:#5c6857}
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*:before,*:after{animation:none!important;transition:none!important}.button:hover,.demo-step.is-active{transform:none}}
 
-.workspace-register { min-height: 44px; }
-.workspace-login { white-space: nowrap; }
+:root { --caption-ink: #596550; }
+
+.hero-note, .flow-float-top, .flow-float-labels, .visual-caption,
+.integration-label, .integration-end, .platform, .section-kicker,
+.card-number, .section-footnote, .process-number, .about-person div > span,
+.faq-side-text, .site-footer > span, .site-footer > div {
+  color: var(--caption-ink);
+}
+.pill, .contact-panel .eyebrow, .contact-panel > p, .contact-bottom { color: #4d623d; }
+.demo-label, .step-index, .node-footer { color: #a6b9a4; }
+
+.workspace-actions { display: flex; align-items: center; flex: 0 0 auto; gap: 8px; }
+.workspace-actions .button { white-space: nowrap; }
+.workspace-login { border: 1px solid #768470; }
+.workspace-login:hover { background: #e7eedb; }
+.workspace-intro { max-width: 46ch; margin: 14px 0 0; color: var(--green); font-size: 15px; }
+.hero-actions { flex-wrap: wrap; gap: 12px; margin-top: 20px; }
+.workspace-register { background: var(--lime); color: var(--ink); border: 1px solid #768470; }
+.workspace-register:hover { background: #c5e58d; }
+
+@media (min-width: 681px) and (max-width: 950px) {
+  .header-inner { gap: 14px; }
+  .desktop-nav { flex-wrap: wrap; justify-content: center; gap: 6px 14px; }
+  .desktop-nav a { white-space: nowrap; }
+  .workspace-actions .button { padding-inline: 12px; }
+}
 @media (max-width: 680px) {
-  .header-inner { gap: 10px; }
-  .workspace-login { margin-left: auto; padding-inline: 12px; }
+  html { scroll-padding-top: 116px; }
+  .site-header { height: auto; }
+  .header-inner {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 6px 12px;
+    padding-block: 6px;
+  }
+  .workspace-actions { grid-column: 1 / -1; }
+  .workspace-actions .button { flex: 1; font-size: 13px; padding-inline: 8px; }
+  .mobile-menu:not([hidden]) { top: 100%; max-height: calc(100dvh - 104px); overflow-y: auto; }
+  .hero-actions .button { font-size: 14px; }
+}
+@media (max-width: 420px) {
+  .hero-actions { display: grid; grid-template-columns: 1fr; gap: 10px; }
 }

@@ -322,7 +322,14 @@ test("guest homepage opens the standalone showcase and sign-in restores only sup
   assert.equal(response.headers.get("content-type"), "text/html; charset=utf-8");
   const html = await response.text();
   assert.match(html, /<title>Belozerov AI/);
-  assert.match(html, /href="\/register" target="_top"/);
+  const registration = /<a\b[^>]*href="\/register" target="_top"[^>]*>Регистрация компании/;
+  const header = html.match(/<header\b[\s\S]*?<\/header>/)?.[0] ?? "";
+  const mobileMenu = header.match(/<nav id="mobile-menu"[^>]*>[\s\S]*?<\/nav>/)?.[0] ?? "";
+  const hero = html.match(/<section class="hero container"[^>]*>[\s\S]*?<\/section>/)?.[0] ?? "";
+  assert.match(header.replace(mobileMenu, ""), registration);
+  assert.match(mobileMenu, registration);
+  assert.match(hero, registration);
+  assert.match(hero, /data-open-brief>Обсудить мою задачу/);
   const links = [...html.matchAll(/href="(\/signin-with-chatgpt\?[^"]+)" target="_top"/g)];
   assert.ok(links.length);
   for (const [,link] of links) {

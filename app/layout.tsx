@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { getChatGPTUser } from "./chatgpt-auth";
 import { HeaderAuth } from "@/components/ruli/header-auth";
+import { canOpenCurrentTeam } from "@/lib/ruli/company-profile";
 import "./globals.css";
 import "./ruli.css";
 
@@ -28,6 +29,8 @@ export default async function RootLayout({
   children: React.ReactNode;
 }>) {
   const user = await getChatGPTUser();
+  const hasTeam = user ? await canOpenCurrentTeam(user) : false;
+  const BrandLink = hasTeam ? Link : "a";
 
   return (
     <html lang="ru">
@@ -43,17 +46,18 @@ export default async function RootLayout({
       </head>
       <body className="bento antialiased">
         <header className="topbar">
-          <Link href="/" className="brand" aria-label="Рули — все задачи">
+          <BrandLink href={hasTeam ? "/" : "/vitrina"} className="brand"
+            aria-label={hasTeam ? "Рули — все задачи" : "Рули — на главную"}>
             <span className="brand-mark">
               <i />
               <i />
               <i />
             </span>
             рули<span className="brand-dot">.</span>
-          </Link>
-          {user && <span className="workspace-label">Моя команда</span>}
+          </BrandLink>
+          {hasTeam && <span className="workspace-label">Моя команда</span>}
           <div className="topbar-right">
-            {user && <Link className="team-button" href="/team" aria-label="Сотрудники и боты">
+            {hasTeam && user && <Link className="team-button" href="/team" aria-label="Сотрудники и боты">
               <span className="team-button-label">Сотрудники и боты</span>
               <span className="avatar small" title={user.email}>
                 {initialsOf(user.fullName || user.displayName)}

@@ -27,6 +27,6 @@ export default async function RegisterPage() {
         <a className="primary" href={chatGPTSignInPath("/register")} target="_top">Войти через ChatGPT</a>
       </>}
     </div>
-    <Link className="editor-back onboarding-back" href="/">← На главную</Link>
+    <a className="editor-back onboarding-back" href="/vitrina">← На главную</a>
   </div></main>;
 }
