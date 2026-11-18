@@ -303,6 +303,33 @@ test("composer captures the rejected submitted revision separately and renders r
   assert.doesNotMatch(html,/Сообщение остаётся в форме/);
 });
 
+test("guest homepage opens the standalone showcase and sign-in restores only supported dashboard filters", async () => {
+  const showcase = fs.readFileSync(path.join(root, "showcase/belozerov.html"), "utf8");
+  const h = ui({ globals:{ Response }, imports:{
+    "@/components/ruli/views": {},
+    "@/lib/ruli/data": {},
+    "@/lib/ruli/company-profile": {},
+    "@/db": {},
+    "@/showcase/belozerov.html?raw": showcase,
+    "@/app/chatgpt-auth": { getChatGPTUser: async () => null, chatGPTSignInPath: value => "/signin-with-chatgpt?return_to=" + encodeURIComponent(value) },
+    "next/navigation": { redirect: path => { throw new Error(path); } },
+  }});
+  const { default: Home } = h.load("app/page.tsx");
+  const { GET } = h.load("app/vitrina/route.ts");
+  await assert.rejects(Home({searchParams:Promise.resolve({q:"demo", mode:"build", unrelated:"drop"})}),
+    {message:"/vitrina?q=demo&mode=build"});
+  const response = GET(new Request("https://ruli.test/vitrina?q=demo&mode=build&unrelated=drop"));
+  assert.equal(response.headers.get("content-type"), "text/html; charset=utf-8");
+  const html = await response.text();
+  assert.match(html, /<title>Belozerov AI/);
+  assert.match(html, /href="\/register"/);
+  const links = [...html.matchAll(/href="(\/signin-with-chatgpt\?[^"]+)"/g)];
+  assert.ok(links.length);
+  for (const [,link] of links) {
+    assert.equal(new URL(link,"https://ruli.test").searchParams.get("return_to"), "/?q=demo&mode=build");
+  }
+});
+
 test("home never fetches root deliveries while group and task pages expose only safe manager metadata", async () => {
   for (const role of ["manager", "executor", "viewer"]) {
     for (const kind of ["root", "group", "leaf"]) {

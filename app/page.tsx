@@ -3,8 +3,7 @@ import {getMembers,loadTree} from "@/lib/ruli/data";
 import {todayISO} from "@/lib/ruli/model";
 import {requireAccess,canManage} from "@/lib/ruli/access";
 import {homeReturnPath} from "@/lib/ruli/return-path";
-import Link from "next/link";
-import {chatGPTSignInPath, getChatGPTUser} from "@/app/chatgpt-auth";
+import {getChatGPTUser} from "@/app/chatgpt-auth";
 import {getManagerCompanyProfile} from "@/lib/ruli/company-profile";
 import {getCurrentWorkspaceId} from "@/db";
 import {redirect} from "next/navigation";
@@ -14,14 +13,7 @@ export default async function Home({searchParams}:{searchParams:Promise<Record<s
   const params=await searchParams;
   const destination=homeReturnPath(params);
   if (!await getChatGPTUser()) {
-    return <main className="workspace"><section className="editor-panel entry-panel">
-      <h1>Рабочее пространство команды</h1>
-      <p>Руководитель регистрирует компанию и приглашает команду. Если вы сотрудник, откройте ссылку от руководителя.</p>
-      <div className="entry-actions">
-        <Link className="primary" href="/register">Зарегистрировать компанию</Link>
-        <a className="secondary" href={chatGPTSignInPath(destination)}>Войти в команду</a>
-      </div>
-    </section></main>;
+    redirect("/vitrina" + destination.slice(1));
   }
   if (!await getCurrentWorkspaceId()) redirect("/register");
   const viewer=await requireAccess(destination);
