@@ -322,8 +322,8 @@ test("guest homepage opens the standalone showcase and sign-in restores only sup
   assert.equal(response.headers.get("content-type"), "text/html; charset=utf-8");
   const html = await response.text();
   assert.match(html, /<title>Belozerov AI/);
-  assert.match(html, /href="\/register"/);
-  const links = [...html.matchAll(/href="(\/signin-with-chatgpt\?[^"]+)"/g)];
+  assert.match(html, /href="\/register" target="_top"/);
+  const links = [...html.matchAll(/href="(\/signin-with-chatgpt\?[^"]+)" target="_top"/g)];
   assert.ok(links.length);
   for (const [,link] of links) {
     assert.equal(new URL(link,"https://ruli.test").searchParams.get("return_to"), "/?q=demo&mode=build");

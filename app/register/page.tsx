@@ -24,7 +24,7 @@ export default async function RegisterPage() {
         <CompanyRegistrationForm initialName={initialName}/>
       </> : <>
         <p>Войдите через ChatGPT, чтобы создать свою компанию и пригласить сотрудников по ссылке.</p>
-        <a className="primary" href={chatGPTSignInPath("/register")}>Войти через ChatGPT</a>
+        <a className="primary" href={chatGPTSignInPath("/register")} target="_top">Войти через ChatGPT</a>
       </>}
     </div>
     <Link className="editor-back onboarding-back" href="/">← На главную</Link>
