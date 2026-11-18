@@ -54,7 +54,7 @@ export function TaskAiPanel({taskId,version,data,manager,clientId}:{taskId:strin
   </section>;
 }
 
-type RetryRun=Pick<AiRunSummary,"id"|"botMemberId"|"channelMemberId"|"inputMessageId"|"error">;
+type RetryRun=Pick<AiRunSummary,"id"|"botMemberId"|"channelMemberId"|"inputMessageId"|"error"> & {status?:AiRunSummary["status"]};
 export function AiChatRetry({taskId,run,clientId}:{taskId:string;run:RetryRun;clientId:string}) {
   const requestId=useRef(`${clientId}-${run.id}`);
   const [state,action,pending]=useActionState<ActionState,FormData>(async(previous,form)=>{
@@ -63,6 +63,6 @@ export function AiChatRetry({taskId,run,clientId}:{taskId:string;run:RetryRun;cl
     if(next.aiStatus&&next.aiStatus!=="pending")requestId.current=crypto.randomUUID();
     return next;
   },{});
-  useEffect(()=>{if(state.aiStatus==="succeeded")window.location.reload();},[state.aiStatus]);
-  return <div className="ai-chat-retry"><p className="ai-run-error">Ответ AI не получен. {run.error}</p><form action={action}><input type="hidden" name="taskId" value={taskId}/><input type="hidden" name="runId" value={run.id}/><input type="hidden" name="botMemberId" value={run.botMemberId}/><input type="hidden" name="channelMemberId" value={run.channelMemberId??""}/><input type="hidden" name="inputMessageId" value={run.inputMessageId??""}/><input type="hidden" name="clientId" value={clientId}/><SubmitButton className="secondary" disabled={pending} pendingLabel="AI готовит ответ…">Повторить ответ AI</SubmitButton><RunFeedback state={state} pending={pending}/></form><small>Повторяется только запрос боту. Ваше сообщение не будет отправлено ещё раз.</small></div>;
+  useEffect(()=>{if(state.aiStatus==="succeeded"||state.aiStatus==="stale")window.location.reload();},[state.aiStatus]);
+  return <div className="ai-chat-retry">{run.status!=="stale"?<p className="ai-run-error">Ответ AI не получен. {run.error}</p>:null}<form action={action}><input type="hidden" name="taskId" value={taskId}/><input type="hidden" name="runId" value={run.id}/><input type="hidden" name="botMemberId" value={run.botMemberId}/><input type="hidden" name="channelMemberId" value={run.channelMemberId??""}/><input type="hidden" name="inputMessageId" value={run.inputMessageId??""}/><input type="hidden" name="clientId" value={clientId}/><SubmitButton className="secondary" disabled={pending} pendingLabel="AI готовит ответ…">{run.status==="stale"?"Запросить новый ответ":"Повторить ответ AI"}</SubmitButton><RunFeedback state={state} pending={pending}/></form><small>{run.status==="stale"?"AI ответит на исходное сообщение с учётом актуальной задачи и переписки. Сохранённый ответ останется доступен.":"Повторяется только запрос боту. Ваше сообщение не будет отправлено ещё раз."}</small></div>;
 }

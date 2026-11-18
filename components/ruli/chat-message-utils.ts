@@ -4,8 +4,8 @@ const TIME_ZONE = "Asia/Barnaul";
 export type MessageBlock =
   | { type: "paragraph" | "quote"; text: string }
   | { type: "code"; text: string; language: string }
-  | { type: "list"; ordered: boolean; items: string[] };
-export type FeedPayload = MessagePageInfo & { messages: ChatMessage[]; aiPending: number; aiRuns: ChatAiRun[] };
+  | { type: "list"; ordered: boolean; items: string[]; numbers?: number[] };
+export type FeedPayload = MessagePageInfo & { messages: ChatMessage[]; aiPending: number; aiRuns: ChatAiRun[]; canWrite:boolean };
 export type FeedIssue = { kind: "network" | "auth" | "forbidden" | "missing"; message: string; retryable: boolean };
 export type HistoryProgress = { cursors: { value: string; gap: boolean }[] };
 type HistoryPage = MessagePageInfo & { messages: ChatMessage[] };
@@ -127,7 +127,7 @@ export function formatQuote(authorName: string, body: string): string {
 }
 
 const fence = (line: string) => /^\s{0,3}```([^\s`]*)\s*$/.exec(line);
-const listItem = (line: string) => /^\s*(?:([-*+])|\d+[.)])\s+(.+)$/.exec(line);
+const listItem = (line: string) => /^\s*(?:([-*+])|(\d{1,9})[.)])\s+(.+)$/.exec(line);
 
 export function parseMessageBlocks(body: string): MessageBlock[] {
   const lines = body.replace(/\r\n?/g, "\n").split("\n");
@@ -155,13 +155,15 @@ export function parseMessageBlocks(body: string): MessageBlock[] {
     if (item) {
       const ordered = !item[1];
       const items: string[] = [];
+      const numbers: number[] = [];
       while (index < lines.length) {
         const next = listItem(lines[index]);
         if (!next || !next[1] !== ordered) break;
-        items.push(next[2]);
+        items.push(next[3]);
+        if (ordered) numbers.push(Number(next[2]));
         index++;
       }
-      blocks.push({ type: "list", ordered, items });
+      blocks.push({ type: "list", ordered, items, ...(ordered ? {numbers} : {}) });
       continue;
     }
     const content = [lines[index++]];
@@ -211,8 +213,18 @@ function isAiRun(value: unknown): value is ChatAiRun {
   if (!value || typeof value !== "object") return false;
   const item = value as Record<string, unknown>;
   return ["id", "botMemberId", "createdAt"].every(key => typeof item[key] === "string")
-    && ["channelMemberId", "inputMessageId", "error", "finishedAt"].every(key => item[key] === null || typeof item[key] === "string")
+    && ["channelMemberId", "inputMessageId", "error", "finishedAt", "output"].every(key => item[key] === null || typeof item[key] === "string")
     && ["pending", "succeeded", "failed", "stale"].includes(String(item.status)) && typeof item.canRetry === "boolean";
+}
+
+/** Replace only the current page's AI snapshot; older loaded pages stay visible. */
+export function mergeChatAiRuns(current:ChatAiRun[], incoming:ChatAiRun[], messageIds:string[], channel?:string|null):ChatAiRun[] {
+  const ids=new Set(messageIds),expected=channelKey(channel);
+  if([...current,...incoming].some(run=>run.channelMemberId!==expected)
+    ||incoming.some(run=>!run.inputMessageId||!ids.has(run.inputMessageId)))throw new Error("wrong-ai-scope");
+  const byId=new Map(current.filter(run=>!run.inputMessageId||!ids.has(run.inputMessageId)).map(run=>[run.id,run]));
+  for(const run of incoming)byId.set(run.id,run);
+  return [...byId.values()].sort((a,b)=>b.createdAt.localeCompare(a.createdAt)||b.id.localeCompare(a.id));
 }
 
 export function parseFeedPayload(value: unknown, taskId: string, channel?: string | null): FeedPayload {
@@ -221,9 +233,10 @@ export function parseFeedPayload(value: unknown, taskId: string, channel?: strin
   if (!Array.isArray(data.messages) || !data.messages.every(isMessage) || typeof data.hasMore !== "boolean"
     || !(data.beforeCursor === null || typeof data.beforeCursor === "string")
     || (data.hasMore && !data.beforeCursor)
-    || !Array.isArray(data.aiRuns) || !data.aiRuns.every(isAiRun)) throw new Error("invalid-messages");
+    || !Array.isArray(data.aiRuns) || !data.aiRuns.every(isAiRun) || typeof data.canWrite !== "boolean") throw new Error("invalid-messages");
   const messages = mergeMessages([], data.messages, taskId, channel);
   if (data.aiRuns.some(run => run.channelMemberId !== channelKey(channel))) throw new Error("wrong-channel");
+  const aiRuns=mergeChatAiRuns([],data.aiRuns,messages.map(message=>message.id),channel);
   const aiPending = typeof data.aiPending === "number" && Number.isSafeInteger(data.aiPending) && data.aiPending > 0 ? data.aiPending : 0;
-  return { messages, hasMore: data.hasMore, beforeCursor: data.beforeCursor, aiPending, aiRuns: data.aiRuns };
+  return { messages, hasMore: data.hasMore, beforeCursor: data.beforeCursor, aiPending, aiRuns, canWrite:data.canWrite };
 }

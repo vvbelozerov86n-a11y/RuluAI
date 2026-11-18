@@ -96,7 +96,7 @@ test("mentions, participants and anti-cycle shape message events", () => {
   const planned = planMessageEvents(involved, human, [vk, dzen]);
   assert.deepEqual(planned.map(item => [item.agent.slug, item.event]).sort(), [["dzen", "message.created"], ["vk", "bot.mentioned"]]);
   const self = planMessageEvents(involved, { ...human, authorId: "bot-vk", authorKind: "bot", text: "Готово" }, [vk, dzen]);
-  assert.deepEqual(self.map(item => item.agent.slug), ["dzen"]);
+  assert.deepEqual(self.map(item => item.agent.slug), []);
   const privateChannel = planMessageEvents(involved, { ...human, text: "Личное", channelMemberId: "bot-dzen" }, [vk, dzen]);
   assert.deepEqual(privateChannel.map(item => item.agent.slug), ["dzen"]);
   assert.deepEqual(mentionedAgents("@Дзен, проверь", [vk, dzen]).map(item => item.slug), ["dzen"]);
@@ -108,6 +108,14 @@ test("private mentions never forward text to another bot or a human channel's bo
   assert.deepEqual(planMessageEvents(involved, message, [vk, dzen]).map(item => [item.agent.slug, item.event]), [["dzen", "bot.mentioned"]]);
   assert.deepEqual(planMessageEvents(involved, { ...message, channelMemberId: "human" }, [vk, dzen]), []);
   assert.deepEqual(planMessageEvents(involved, { ...message, authorId: "bot-dzen", authorKind: "bot" }, [vk, dzen]), []);
+});
+
+test("ordinary agent replies do not trigger other agents but explicit mentions still deliver",()=>{
+  const involved=task({participants:["bot-dzen"]});
+  const reply={id:"agent-reply",authorId:"bot-vk",authorName:"VK",authorKind:"bot",text:"Готово, результат для руководителя",channelMemberId:null};
+  assert.deepEqual(planMessageEvents(involved,reply,[vk,dzen]),[]);
+  assert.deepEqual(planMessageEvents(involved,{...reply,text:"@dzen проверь результат"},[vk,dzen]).map(item=>[item.agent.slug,item.event]),[["dzen","bot.mentioned"]]);
+  assert.deepEqual(planMessageEvents(involved,{...reply,authorId:"me",authorKind:"human"},[vk,dzen]).map(item=>item.agent.slug),["vk","dzen"]);
 });
 
 test("a group private channel reaches its active descendant agent without expanding the general audience", async t => {

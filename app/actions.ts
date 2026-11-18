@@ -106,7 +106,7 @@ function participantWrites(id: string, participants: string[], gate: Statement, 
   ];
 }
 
-type Success = { id: string; message: string; target?: string };
+type Success = { id: string; message: string; target?: string; anchor?: string };
 type Operation = (form: FormData) => Promise<Success>;
 
 async function perform(form: FormData, operation: Operation): Promise<ActionState> {
@@ -123,7 +123,7 @@ async function perform(form: FormData, operation: Operation): Promise<ActionStat
   const params = new URLSearchParams({ flash: outcome.message });
   const mode = str(form, "mode");
   if (mode === "view" || mode === "build") params.set("mode", mode);
-  redirect(`${outcome.target ?? taskHref(outcome.id)}?${params.toString()}`);
+  redirect(`${outcome.target ?? taskHref(outcome.id)}?${params.toString()}${outcome.anchor ? `#${encodeURIComponent(outcome.anchor)}` : ""}`);
 }
 
 async function ordinary(form: FormData, operation: Operation, fallback?: string): Promise<void> {
@@ -215,6 +215,21 @@ export async function createTaskState(_previous: ActionState, form: FormData): P
 export async function updateTaskState(_previous: ActionState, form: FormData): Promise<ActionState> { return perform(form, update); }
 export async function createTask(form: FormData): Promise<void> { return ordinary(form, create); }
 export async function updateTask(form: FormData): Promise<void> { return ordinary(form, update); }
+
+export async function resizeTaskState(_previous: ActionState, form: FormData): Promise<ActionState> {
+  return perform(form, async form => {
+    await access(form);
+    const { node, path, version } = await nodeFor(form);
+    const parent = path.at(-2);
+    if (node.id === ROOT_ID || !parent) throw new FormError("Размер общей группы изменить нельзя.");
+    const size = str(form, "size");
+    if (!isBlockSize(size)) throw new FormError("Выберите доступный размер карточки.");
+    await ensureChanged(await runMutation(getD1(), {
+      id: node.id, version, set: { sql: "size=?", params: [size] },
+    }));
+    return { id: parent.id, anchor: `task-card-${node.id}`, message: "Размер карточки сохранён." };
+  });
+}
 
 export async function deleteTask(form: FormData): Promise<void> {
   return ordinary(form, async form => {
@@ -344,14 +359,15 @@ export async function unnestTask(form: FormData): Promise<void> {
     const child = node.children[0];
     if (node.kind !== "group" || node.children.length !== 1 || child.kind !== "leaf" || child.splitSourceId !== node.id) throw new FormError("Отмена доступна, только пока группа содержит одну исходную копию задачи.");
     const sameParticipants = JSON.stringify([...new Set(node.participants)].sort()) === JSON.stringify([...new Set(child.participants)].sort());
-    if (node.title !== child.title || node.ownerId !== child.ownerId || node.dueDate !== child.dueDate || node.description !== child.description || !sameParticipants) {
-      throw new FormError("Группа и исходная задача уже изменены по-разному. Отмена недоступна, чтобы не потерять правки названия, описания или участников.");
+    if (node.title !== child.title || node.ownerId !== child.ownerId || node.dueDate !== child.dueDate || node.description !== child.description || (node.priority ?? null) !== (child.priority ?? null) || !sameParticipants) {
+      throw new FormError("Группа и исходная задача уже изменены по-разному. Отмена недоступна, чтобы не потерять правки названия, описания, приоритета или участников.");
     }
+    // Retired empty plan metadata is retained below; only actual work or
+    // conversation would be hidden by archiving the original child.
     const activity = await getD1().prepare(`SELECT
       (SELECT COUNT(*) FROM task_messages WHERE task_id=?) +
-      (SELECT COUNT(*) FROM schedule_entries WHERE plan_task_id=?) +
-      (SELECT COUNT(*) FROM schedule_plans WHERE task_id=?) AS count`)
-      .bind(child.id,child.id,child.id).first<{ count: number }>();
+      (SELECT COUNT(*) FROM schedule_entries WHERE plan_task_id=?) AS count`)
+      .bind(child.id,child.id).first<{ count: number }>();
     if (Number(activity?.count ?? 0) > 0) throw new FormError("В подзадаче уже есть переписка или сохранённый график, созданный отдельно для неё. Отмена разбиения скрыла бы эту работу, поэтому недоступна.");
     const now = new Date().toISOString();
     const batchId = `split-undo-${crypto.randomUUID()}`;
@@ -360,8 +376,7 @@ export async function unnestTask(form: FormData): Promise<void> {
       guard:{sql:`kind='group' AND (SELECT COUNT(*) FROM tasks WHERE parent_id=? AND deleted_at IS NULL)=1
         AND EXISTS (SELECT 1 FROM tasks WHERE id=? AND version=? AND kind='leaf' AND split_source_id=? AND deleted_at IS NULL)
         AND NOT EXISTS (SELECT 1 FROM task_messages WHERE task_id=?)
-        AND NOT EXISTS (SELECT 1 FROM schedule_entries WHERE plan_task_id=?)
-        AND NOT EXISTS (SELECT 1 FROM schedule_plans WHERE task_id=?)`,params:[node.id,child.id,child.version,node.id,child.id,child.id,child.id]},
+        AND NOT EXISTS (SELECT 1 FROM schedule_entries WHERE plan_task_id=?)`,params:[node.id,child.id,child.version,node.id,child.id,child.id]},
       set:{sql:"kind='leaf',title=?,owner_id=?,status=?,priority=?,due_label=?,due_date=?,description=?,result=?",params:[child.title,child.ownerId,child.status,child.priority ?? null,child.dueLabel,child.dueDate,child.description,child.result]},
       statements:(gate,token)=>[...participantWrites(node.id,child.participants,gate,true),{
         sql:`UPDATE schedule_entries SET task_id=?,version=version+1 WHERE task_id=? AND ${gate.sql}`,
@@ -383,21 +398,29 @@ function expectedStatus(form: FormData, node: TaskNode): string {
 
 export async function setStatus(form: FormData): Promise<void> {
   return ordinary(form,async form => {
-    await access(form);
+    const ctx = await access(form,false);
     const {node,version,tree} = await nodeFor(form);
     const expected = expectedStatus(form,node);
     const status = str(form,"status");
+    const start = expected === "todo" && status === "doing";
+    if (!canManage(ctx) && !(start && canSubmit(ctx,node))) {
+      throw new FormError(start ? "Взять задачу в работу может руководитель или назначенный участник этой задачи." : "Это действие доступно только руководителю.");
+    }
     const allowed = (status === "done" && expected === "review" && Boolean(node.result.trim())) ||
       (status === "doing" && ["review","done","todo"].includes(expected)) ||
       (status === "todo" && expected === "doing");
     if (node.kind !== "leaf" || !allowed) throw new FormError("Этот переход статуса недоступен. Принять можно только результат, переданный на проверку.");
     const reopen = expected === "done" && status === "doing";
+    const permission: Statement = canManage(ctx) ? {sql:"1=1",params:[]} : {
+      sql:"(owner_id=? OR EXISTS (SELECT 1 FROM task_participants p WHERE p.task_id=tasks.id AND p.member_id=?))",
+      params:[ctx.memberId,ctx.memberId],
+    };
     await ensureChanged(await runMutation(getD1(),{
       id:node.id,version,status:expected,
-      guard:reopen ? rootVersionGuard(tree.version,{sql:"kind='leaf'",params:[]}) : {sql:"kind='leaf'",params:[]},
+      guard:reopen ? rootVersionGuard(tree.version,{sql:"kind='leaf'",params:[]}) : {sql:`kind='leaf' AND ${permission.sql}`,params:permission.params},
       set:{sql:"status=?",params:[status]},
     }));
-    return {id:node.id,message:status === "done" ? "Результат принят." : status === "doing" ? "Задача возвращена в работу." : "Задача возвращена в очередь."};
+    return {id:node.id,message:start ? "Задача взята в работу." : status === "done" ? "Результат принят." : status === "doing" ? "Задача возвращена в работу." : "Задача возвращена в очередь."};
   });
 }
 

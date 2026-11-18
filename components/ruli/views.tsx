@@ -8,6 +8,7 @@ import {ResultForm} from "./result-form";
 import {SubmitButton} from "./submit-button";
 import {TaskCollaboration} from "./collaboration";
 import {TaskAssignments} from "./task-assignments";
+import {CardSizeControl} from "./card-size-control";
 import {TaskAiPanel} from "./ai-task";
 import {loadTaskAi} from "@/lib/ruli/ai";
 import {BotDeliveryStatus,type DeliverySummary} from "./bot-delivery";
@@ -34,7 +35,7 @@ function branchPeople(node:TaskNode,members:Member[]) {const p=peopleOf(node,new
 export function TaskCard({node,index,siblingCount,mode,members,today,viewer,path=[node]}:{node:TaskNode;index:number;siblingCount:number;mode:ViewMode;members:Member[];today:string;viewer:AccessContext;path?:TaskNode[]}) {
   const nested=node.kind==="group", s=stats(node,today),size=BLOCK_SIZES[node.size],people=branchPeople(node,members),owner=members.find(m=>m.id===node.ownerId);
   const late=Boolean(overdueSource({node,path},today))||(nested&&taskAttentionSummary(node,today).late>0);
-  return <article className={`task-block bento-card size-${node.size} theme-${node.theme}`} style={{"--span-w":size.w,"--span-h":size.h} as CSSProperties}>
+  return <article id={`task-card-${node.id}`} className={`task-block bento-card size-${node.size} theme-${node.theme}`} style={{"--span-w":size.w,"--span-h":size.h} as CSSProperties}>
     <a className="block-open" href={taskHref(node.id,mode)} aria-label={`${nested?"Открыть подзадачи: ":"Открыть задачу: "}${node.title}`}/>
     <div className="block-top"><span className="block-index">{String(index+1).padStart(2,"0")}</span><SignalChip late={late} review={s.review} nested={nested} status={node.status}/><span className="enter-arrow" aria-hidden="true">↘</span></div>
     <div className="block-title"><h2 title={node.title}>{node.title}</h2><span className="block-subtitle">{nested?plural(node.children.length,"подзадача","подзадачи","подзадач"):"Задача"}</span></div>
@@ -47,7 +48,7 @@ export function TaskCard({node,index,siblingCount,mode,members,today,viewer,path
       {nested?<Link href={`/new?parent=${node.id}&mode=${mode}`} aria-label={`Добавить подзадачу в: ${node.title}`} title="Добавить подзадачу"><Icon name="plus"/></Link>:<form className="inline" action={nestTask}><MutationFields node={node} mode={mode}/><button type="submit" title="Разбить на подзадачи" aria-label={`Разбить на подзадачи: ${node.title}`}><Icon name="plus"/></button></form>}
       <span className="tools-divider"/>
       {[-1,1].map(delta=><form className="inline" action={moveTask} key={delta}><MutationFields node={node} mode={mode}/><input type="hidden" name="delta" value={delta}/><button type="submit" disabled={delta<0?index===0:index===siblingCount-1} aria-label={`Переместить ${delta<0?"раньше":"позже"}: ${node.title}`}>{delta<0?"←":"→"}</button></form>)}
-      <Link className="size-button" href={`/t/${node.id}/edit?mode=${mode}`}>{size.label}</Link>
+      <CardSizeControl key={`${node.id}:${node.version}`} taskId={node.id} parentId={node.parentId??ROOT_ID} version={node.version} size={node.size} mode={mode}/>
     </div>:null}
   </article>;
 }
@@ -115,7 +116,7 @@ export async function DetailView({node,path,mode,members,today,viewer,flash,erro
   const canSubmit=manager||(viewer.role==="executor"&&(node.ownerId===viewer.memberId||node.participants.includes(viewer.memberId)));
   return <main className={`workspace${mode==="build"?" is-building":""}`}>
     <NavigationRow path={path} mode={mode}/><Toasts flash={flash} error={error}/>
-    <div className="page-heading"><div><h1 id="task-title">{node.title}</h1><p>Задача · {owner?.type==="bot"?"Ответственный — AI-бот":"Ответственный — человек"}</p></div><TaskStatusChip status={status}/></div>
+    <div className="page-heading"><div><h1 id="task-title">{node.title}</h1><p>Задача · {owner?.type==="bot"?"Ответственный — AI-бот":"Ответственный — человек"}</p></div><div className="heading-tools"><TaskStatusChip status={status}/>{status==="todo"&&canSubmit?<form action={setStatus}><MutationFields node={node} mode={mode}/><input type="hidden" name="status" value="doing"/><SubmitButton>Взять в работу</SubmitButton></form>:null}</div></div>
     <TaskContents detail manager={manager}/>
     <div className="leaf-constructor-bar"><ParticipantCounters human={people.counts.human.length} bot={people.counts.bot.length} title={node.title} people={people.list}/><span>Участники задачи</span>{manager?<div><Link className="secondary" href={`/t/${node.id}/edit?mode=${mode}`}>Изменить задачу</Link><form className="inline" action={nestTask}><MutationFields node={node} mode={mode}/><SubmitButton className="secondary">Разбить на подзадачи</SubmitButton></form></div>:null}</div>
     <div className="detail-layout"><article className="detail-card" id="task-details"><h2>Что нужно сделать</h2><p className="prewrap">{node.description||"Описание пока не заполнено."}</p>

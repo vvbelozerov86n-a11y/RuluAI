@@ -1,0 +1,25 @@
+.card-size-control{position:relative;margin-left:auto;flex-shrink:0;color:var(--tileText);z-index:4}
+.card-size-control>summary{display:flex;align-items:center;gap:5px;list-style:none;cursor:pointer;min-height:32px;padding:5px 7px;border:1px solid var(--tileLine);border-radius:5px;font-size:11px;white-space:nowrap}
+.card-size-control>summary::-webkit-details-marker{display:none}
+.card-size-control>summary:focus-visible{outline:2px solid #b9ddc8;outline-offset:3px}
+.card-size-control>summary:hover{background:#ffffff12}
+.card-size-control>summary>svg{width:14px;height:14px}
+.bento-card:has(.card-size-control[open]){z-index:35}
+.card-size-options{position:absolute;z-index:10;right:0;bottom:calc(100% + 7px);width:248px;max-width:calc(100vw - 58px);margin:0;padding:12px;border:1px solid #647f79;border-radius:10px;background:#193239;color:#e0eee7;box-shadow:0 10px 30px #0005}
+.card-size-heading{display:block;margin-bottom:10px;font-size:13px;font-weight:600}
+.card-size-choices{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.card-size-choices>form{display:block;min-width:0;margin:0}
+.card-size-control .card-size-choices button{width:100%;min-width:0;max-width:none;height:auto;min-height:54px;display:flex;gap:8px;justify-content:flex-start;padding:8px;border:1px solid #708f89;border-radius:6px;background:#254248;color:#e4f2e9;font-size:11px;text-align:left;white-space:normal}
+.bento .card-builder-tools .card-size-control .card-size-choices button{width:100%;min-width:0;max-width:none;height:auto;min-height:54px}
+.card-size-control .card-size-choices button:hover:not(:disabled){background:#35564e;color:#edf8ed}
+.card-size-control .card-size-choices button[aria-pressed="true"]{background:#b6dcc6;color:#234332;border-color:#d5edda;opacity:1}
+.card-size-control .card-size-choices button:disabled:not([aria-pressed="true"]){opacity:.55}
+.card-size-choices button>span:last-child{display:flex;flex-direction:column;gap:3px;min-width:0;overflow-wrap:anywhere}
+.card-size-choices small{font-size:10px;opacity:.8}
+.card-size-preview{display:block;width:16px;height:16px;border:1px solid currentColor;background:currentColor;border-radius:2px;opacity:.55;flex-shrink:0}
+.card-size-preview.wide{width:25px;height:13px}.card-size-preview.tall{width:13px;height:25px}.card-size-preview.large{width:25px;height:25px}
+.card-size-options .card-size-mobile-note{display:none;margin:10px 0 0;color:#adc9c1;font-size:11px;line-height:1.5}
+.card-size-options .card-size-feedback,.card-size-options .card-size-error{margin:10px 0 0;font-size:12px;line-height:1.5;overflow-wrap:anywhere}
+.card-size-options .card-size-error{color:#f0c9b4}.card-size-error a{text-decoration:underline;text-underline-offset:3px}
+.bento-card[id]{scroll-margin-top:24px}
+@media(max-width:550px){.card-size-control>summary{min-height:44px;min-width:56px;justify-content:center}.card-size-options .card-size-mobile-note{display:block}}

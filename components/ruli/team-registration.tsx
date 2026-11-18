@@ -1,7 +1,7 @@
 "use client";
 
 import {useActionState,useId,useState} from "react";
-import {addTeamMemberState} from "@/app/team-actions";
+import {addTeamMemberState,updatePendingEmailState} from "@/app/team-actions";
 import type {ActionState} from "@/lib/ruli/action-state";
 import type {Member} from "@/lib/ruli/model";
 import {SubmitButton} from "./submit-button";
@@ -24,10 +24,25 @@ export function TeamRegistration({availableMembers}:{availableMembers:Pick<Membe
       <label htmlFor={`${id}-email`}>Почта для входа<input id={`${id}-email`} name="email" type="email" required maxLength={254} value={email} onChange={event=>setEmail(event.target.value)} disabled={pending} autoComplete="off" autoCapitalize="none" spellCheck={false} placeholder="name@example.com"/></label>
     </div>
     <label htmlFor={`${id}-role`}>Права<select id={`${id}-role`} name="role" value={role} onChange={event=>setRole(event.target.value)} disabled={pending} aria-describedby={`${id}-role-help`}><option value="executor">Исполнитель</option><option value="viewer">Наблюдатель</option></select></label>
-    <p id={`${id}-role-help`} className="team-field-help">Исполнитель работает со своими задачами и пишет в чатах. Наблюдатель может только просматривать.</p>
+    <p id={`${id}-role-help`} className="team-field-help">Исполнитель работает со своими задачами и пишет в чатах. Наблюдатель читает задачи, общий чат и свой личный диалог с руководителем, но не может отправлять сообщения или изменять данные.</p>
     {state.error?<p className="form-error" role="alert">{state.error} Введённые данные сохранены в форме.</p>:null}
     <SubmitButton disabled={pending} pendingLabel="Регистрируем…">Зарегистрировать сотрудника</SubmitButton>
   </form>;
+}
+
+export function PendingEmailCorrection({memberId,email}:{memberId:string;email:string}) {
+  const [state,action,pending]=useActionState<ActionState,FormData>(updatePendingEmailState,{});
+  const id=useId();
+  const [nextEmail,setNextEmail]=useState(()=>typeof state.values?.email==="string"?state.values.email:email);
+  return <details className="team-email-correction"><summary>Исправить почту</summary>
+    <p>До первого входа можно исправить опечатку. Имя, права, задачи и переписка сотрудника сохранятся.</p>
+    <form action={action} aria-busy={pending}>
+      <input type="hidden" name="memberId" value={memberId}/><input type="hidden" name="expectedEmail" value={email}/>
+      <label htmlFor={`${id}-email`}>Почта для входа<input id={`${id}-email`} name="email" type="email" required maxLength={254} value={nextEmail} onChange={event=>setNextEmail(event.target.value)} disabled={pending} autoComplete="off" autoCapitalize="none" spellCheck={false}/></label>
+      {state.error?<p className="form-error" role="alert">{state.error}</p>:null}
+      <SubmitButton disabled={pending||nextEmail.trim().toLowerCase()===email} pendingLabel="Сохраняем почту…">Сохранить почту</SubmitButton>
+    </form>
+  </details>;
 }
 
 export function TeamSignInLink({signInPath}:{signInPath:string}) {

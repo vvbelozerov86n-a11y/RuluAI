@@ -23,6 +23,10 @@
 .team-management .team-accounts { margin-top:20px; }
 .team-management .team-accounts summary { cursor:pointer; padding:12px 0; font-size:14px; color:#dcebe3; }
 .team-management .account-list { margin:0; overflow-wrap:anywhere; }
+.team-management .team-email-correction { margin-top:5px; }
+.team-management .team-email-correction summary { color:#cce1bd; padding:8px 0; }
+.team-management .team-email-correction form { max-width:480px; }
+.team-management .editor-panel .team-access .form-error { color:#ffb8a7; }
 .team-management .team-people { border-top:1px solid #47636a; padding-top:24px; margin-top:28px; }
 .team-management .ai-create { padding:20px; margin:22px 0; scroll-margin-top:24px; }
 .team-management .ai-create h3 { font-size:19px; margin:0 0 10px; }

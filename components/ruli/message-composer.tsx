@@ -9,11 +9,9 @@ import {formatQuote} from "./chat-message-utils";
 import type {TaskBot} from "@/lib/ruli/ai";
 import "./message-composer.css";
 
-export function MessageComposer({taskId,channelMemberId="",viewerUserId,clientId,mode,bots=[],privateBot}:{
-  taskId:string;channelMemberId?:string;viewerUserId:string;clientId:string;mode:string;bots?:TaskBot[];privateBot?:TaskBot;
+export function MessageComposer({taskId,channelMemberId="",viewerUserId,clientId,mode,bots=[],privateBot,aiDisabledReason}:{
+  taskId:string;channelMemberId?:string;viewerUserId:string;clientId:string;mode:string;bots?:TaskBot[];privateBot?:TaskBot;aiDisabledReason?:string|null;
 }) {
-  const [state,action,pending]=useActionState<ActionState,FormData>(sendMessageState,{});
-  const [selectedBot,setSelectedBot]=useState("");
   const [quoteError,setQuoteError]=useState("");
   const [accessError,setAccessError]=useState("");
   const [recoveryStatus,setRecoveryStatus]=useState("");
@@ -21,17 +19,28 @@ export function MessageComposer({taskId,channelMemberId="",viewerUserId,clientId
   const textareaRef=useRef<HTMLTextAreaElement>(null);
   const formRef=useRef<HTMLFormElement>(null);
   const modelBots=bots.filter(item=>item.kind!=="agent");
-  const bot=privateBot??(!channelMemberId?modelBots.find(item=>item.memberId===selectedBot):undefined);
-  const external=bot?.kind==="agent";
   const generalAgents=!channelMemberId&&bots.some(item=>item.kind==="agent");
   const storageKey=draftStorageKey({viewerUserId,taskId,channelMemberId});
   const store=useMemo(()=>getDraftStore(storageKey,clientId),[storageKey,clientId]);
   const {draft,persistent,unsent=[]}=useSyncExternalStore(store.subscribe,store.getSnapshot,store.getServerSnapshot);
+  const selectedBot=channelMemberId?"":draft.botMemberId??"";
+  const bot=privateBot??modelBots.find(item=>item.memberId===selectedBot);
+  const external=bot?.kind==="agent";
+  const missingBot=Boolean(selectedBot && !bot);
+  const permissionBlocked=Boolean(aiDisabledReason && bot && !external);
+  const [state,action,pending]=useActionState<ActionState,FormData>(async (previous,form)=>{
+    const result=await sendMessageState(previous,form);
+    // The store outlives channel navigation. Record delivery even after unmount.
+    if(result.sentClientId) store.acknowledge(result.sentClientId);
+    return result;
+  },{});
+  const [submittingId,setSubmittingId]=useState("");
+  const recovery=unsent.filter(item=>!pending || item.clientId!==submittingId);
   const acknowledged=useRef<string|null>(null);
   const recovered=useRef(new Set<string>());
   const failedBody=typeof state.values?.body==="string"?state.values.body:"";
   const failedClientId=typeof state.values?.clientId==="string"?state.values.clientId:clientId;
-  const unavailable=Boolean(bot&&!bot.ready)||Boolean(accessError);
+  const unavailable=missingBot||permissionBlocked||Boolean(bot&&!bot.ready)||Boolean(accessError);
   const canSend=Boolean(draft.body.trim())&&!unavailable&&!pending;
 
   useEffect(()=>{
@@ -48,8 +57,9 @@ export function MessageComposer({taskId,channelMemberId="",viewerUserId,clientId
   useEffect(()=>{
     if(!state.error||!failedBody.trim()||failedBody===draft.body||recovered.current.has(failedClientId))return;
     recovered.current.add(failedClientId);
-    store.preserveUnsent({body:failedBody,clientId:failedClientId});
-  },[state.error,failedBody,failedClientId,draft.body,store]);
+    const failedBot=state.values?.botMemberId;
+    store.preserveUnsent({body:failedBody,clientId:failedClientId,...(!channelMemberId && typeof failedBot==="string" && failedBot ? {botMemberId:failedBot} : {})});
+  },[state.error,state.values,channelMemberId,failedBody,failedClientId,draft.body,store]);
 
   useEffect(()=>{
     const field=textareaRef.current;
@@ -87,13 +97,15 @@ export function MessageComposer({taskId,channelMemberId="",viewerUserId,clientId
   function onKeyDown(event:KeyboardEvent<HTMLTextAreaElement>) {
     if(event.key!=="Enter"||event.nativeEvent.isComposing||event.keyCode===229||event.shiftKey||event.altKey)return;
     const shortcut=event.ctrlKey||event.metaKey||!window.matchMedia("(pointer: coarse)").matches;
-    if(!shortcut)return;
+    if(!shortcut||!canSend)return;
     event.preventDefault();
-    if(canSend)formRef.current?.requestSubmit();
+    formRef.current?.requestSubmit();
   }
 
   return <><form ref={formRef} className="message-form chat-composer-form" action={action} onSubmit={event=>{
     if(!canSend){event.preventDefault();return;}
+    setSubmittingId(draft.clientId);
+    store.preserveUnsent(draft);
     setQuoteError("");
   }}>
     <input type="hidden" name="taskId" value={taskId}/>
@@ -101,13 +113,15 @@ export function MessageComposer({taskId,channelMemberId="",viewerUserId,clientId
     <input type="hidden" name="clientId" value={draft.clientId}/>
     <input type="hidden" name="mode" value={mode}/>
     {privateBot?<input type="hidden" name="botMemberId" value={privateBot.memberId}/>:null}
-    {(bot||(!channelMemberId&&modelBots.length>0)||generalAgents)?<div className="composer-ai-toolbar">
-      {!privateBot&&!channelMemberId&&modelBots.length?<label className="chat-bot-select composer-ai-target"><Bot aria-hidden="true"/><span className="sr-only">Попросить AI ответить</span><select name="botMemberId" aria-label="Попросить AI ответить" value={selectedBot} disabled={pending} onChange={event=>setSelectedBot(event.target.value)}><option value="">Сообщение команде</option>{modelBots.map(item=><option key={item.memberId} value={item.memberId} disabled={!item.ready}>{item.name}{!item.enabled?" · выключен":!item.configured?" · нужен ключ":""}</option>)}</select></label>:bot?<span className="composer-private-ai"><Bot aria-hidden="true"/>{bot.kind==="agent"?"Внешний агент":bot.provider==="xai"?"Grok":"OpenAI"}</span>:<span className="composer-private-ai"><Bot aria-hidden="true"/>Внешние агенты</span>}
+    {(bot||missingBot||(!channelMemberId&&modelBots.length>0)||generalAgents)?<div className="composer-ai-toolbar">
+      {!privateBot&&!channelMemberId&&(modelBots.length>0||missingBot)?<label className="chat-bot-select composer-ai-target"><Bot aria-hidden="true"/><span className="sr-only">Попросить AI ответить</span><select name="botMemberId" aria-label="Попросить AI ответить" value={selectedBot} disabled={pending} onChange={event=>store.selectBot(event.target.value)}><option value="">Сообщение команде</option>{missingBot?<option value={selectedBot} disabled>Прежний адресат недоступен</option>:null}{modelBots.map(item=><option key={item.memberId} value={item.memberId} disabled={!item.ready||Boolean(aiDisabledReason)}>{item.name}{!item.enabled?" · выключен":!item.configured?" · нужен ключ":""}</option>)}</select></label>:bot?<span className="composer-private-ai"><Bot aria-hidden="true"/>{bot.kind==="agent"?"Внешний агент":bot.provider==="xai"?"Grok":"OpenAI"}</span>:<span className="composer-private-ai"><Bot aria-hidden="true"/>Внешние агенты</span>}
       {!privateBot?<details className="composer-info"><summary><Info aria-hidden="true"/><span>Как работает AI</span><ChevronDown aria-hidden="true"/></summary><div>
         {generalAgents?<p>Сообщения общего чата автоматически передаются включённым внешним агентам, назначенным непосредственно на эту задачу. Для обращения к одному агенту откройте его личный чат.{modelBots.length?" Выбор AI-бота не ограничивает этих получателей.":""}</p>:null}
         {bot?<p>{!bot.ready?bot.disabledReason:external?`Сообщение будет передано внешнему агенту ${bot.name} (Grok Bot) через вебхук. Ответ появится в этом чате после обработки агентом.`:`Сообщение и контекст этого чата будут переданы ${bot.provider==="xai"?"xAI · Grok":"OpenAI"} (${bot.model}). Ответит ${bot.name}.`}</p>:<p>Выберите AI-бота, чтобы он ответил с учётом переписки и задачи. Без выбора сообщение отправляется команде.</p>}
       </div></details>:null}
     </div>:null}
+    {missingBot?<p className="composer-status warning" role="status">Бот этого черновика больше не назначен. Выберите адресата перед отправкой.</p>:null}
+    {aiDisabledReason && !external && (bot || (!channelMemberId && modelBots.length>0))?<p className="composer-status warning" role="status">{aiDisabledReason}</p>:null}
     {privateBot&&!privateBot.ready?<p className="composer-status warning" role="status">{privateBot.disabledReason||"Руководитель должен настроить этого бота перед началом диалога."}</p>:null}
     <div className={`composer-input-shell${pending?" is-sending":""}`}>
       <label htmlFor={textId} className="sr-only">Сообщение</label>
@@ -123,14 +137,14 @@ export function MessageComposer({taskId,channelMemberId="",viewerUserId,clientId
     {accessError?<p className="form-error" role="alert">{accessError} Черновик сохранён в этой вкладке.</p>:null}
     {quoteError?<p className="form-error" role="alert">{quoteError}</p>:null}
     {state.error?<p className="form-error" role="alert">{state.error} Текущий черновик не изменён.</p>:null}
-    {unsent.length?<details className="composer-recovery" open><summary>Неотправленные сообщения · {unsent.length}</summary>
-      <p>Эти сообщения не удалось отправить. Новый черновик сохранён отдельно.</p>
-      {unsent.map(item=><div className="composer-recovery-item" key={item.clientId}>
+    {recovery.length?<details className="composer-recovery" open><summary>Отправка не подтверждена · {recovery.length}</summary>
+      <p>Проверьте переписку перед повторной отправкой. Текст сохранён до подтверждения доставки.</p>
+      {recovery.map(item=><div className="composer-recovery-item" key={item.clientId}>
         <textarea readOnly rows={3} value={item.body} aria-label="Сохранённое неотправленное сообщение"/>
         <div className="composer-recovery-actions">
           <button type="button" onClick={()=>{
             const restored=store.restoreUnsent(item.clientId);
-            setRecoveryStatus(restored==="too-long"?"Тексты вместе превышают 5 000 символов. Скопируйте сохранённое сообщение или сократите текущий черновик — оба текста остаются сохранены.":restored==="restored"?"Сохранённый текст добавлен к черновику.":"");
+            setRecoveryStatus(restored==="too-long"?"Тексты вместе превышают 5 000 символов.":restored==="different-recipient"?"У этих текстов разные адресаты. Сохраните текущий черновик перед восстановлением.":restored==="restored"?"Сохранённый текст добавлен к черновику.":"");
             if(restored==="restored")textareaRef.current?.focus({preventScroll:true});
           }}>Добавить к черновику</button>
           <button type="button" onClick={async()=>{

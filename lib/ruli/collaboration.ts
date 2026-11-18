@@ -13,7 +13,7 @@ export type ChatMessage = {
 export type MessagePageInfo = { hasMore:boolean; beforeCursor:string|null };
 export type MessagePage = MessagePageInfo & { messages:ChatMessage[] };
 export type ChatAiRun = Pick<AiRunSummary,
-  "id"|"botMemberId"|"channelMemberId"|"inputMessageId"|"error"|"status"|"canRetry"|"createdAt"|"finishedAt">;
+  "id"|"botMemberId"|"channelMemberId"|"inputMessageId"|"error"|"status"|"canRetry"|"createdAt"|"finishedAt"|"output">;
 
 export class MessagePageError extends Error {
   readonly status:400|403|404;
@@ -84,7 +84,7 @@ export function taskChannelMembers(node:TaskNode,members:Member[],viewer:AccessC
   const people=peopleOf(node,new Map(members.map(m=>[m.id,m])));
   const assigned=new Set([...people.human,...people.bot]);
   return members.filter(m=>assigned.has(m.id) &&
-    (canManage(viewer) ? m.id!==viewer.memberId : viewer.role==="executor" && m.id===viewer.memberId));
+    (canManage(viewer) ? m.id!==viewer.memberId : canReadChannel(viewer,m.id)));
 }
 
 export const scheduleSelect = `SELECT s.id,s.plan_task_id AS planTaskId,s.task_id AS taskId,

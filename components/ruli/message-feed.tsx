@@ -6,10 +6,10 @@ import { ArrowDown, Bot, Check, Copy, History, LoaderCircle, Quote, RefreshCw, S
 import type { ChatAiRun, ChatMessage, MessagePageInfo } from "@/lib/ruli/collaboration";
 import type { Member } from "@/lib/ruli/model";
 import { taskPagePath } from "@/lib/ruli/return-path";
-import { AiChatRetry } from "./ai-task";
+import { ChatAiFeedback } from "./chat-ai-feedback";
 import { MessageContent } from "./message-content";
 import {
-  advanceHistory, channelKey, createHistoryProgress, feedIssueForStatus, historyPageInfo, mergeMessages, messageDate, messageDayKey, messageDayLabel,
+  advanceHistory, channelKey, createHistoryProgress, feedIssueForStatus, historyPageInfo, mergeChatAiRuns, mergeMessages, messageDate, messageDayKey, messageDayLabel,
   newIncomingIds, normalizeMessageSearch, parseFeedPayload, searchMessages, shortMessageTime,
   observeHistoryHead,
   type FeedIssue,
@@ -68,7 +68,8 @@ export function MessageFeed({ taskId, channelMemberId, viewerMemberId, initialMe
   const [atBottom, setAtBottom] = useState(true);
   const [newIds, setNewIds] = useState<string[]>([]);
   const [aiRuns, setAiRuns] = useState(initialAiRuns);
-  const [aiPending, setAiPending] = useState(initialAiRuns.filter(run => run.status === "pending").length);
+  const [writeAllowed, setWriteAllowed] = useState(canWrite);
+  const aiPending=aiRuns.filter(run=>run.status==="pending").length;
   const listRef = useRef<HTMLOListElement>(null);
   const messagesRef = useRef(messages);
   const readingRef = useRef<ReadingPosition | null>(null);
@@ -163,14 +164,13 @@ export function MessageFeed({ taskId, channelMemberId, viewerMemberId, initialMe
         }
         const data = parseFeedPayload(await response.json(), taskId, channelMemberId);
         if (disposed || controller.signal.aborted) return;
-        const wasBlocked = Boolean(terminalRef.current);
         terminalRef.current = null;
-        if (wasBlocked) notifyAccess(true);
+        setWriteAllowed(canWrite && data.canWrite);
+        notifyAccess(data.canWrite, data.canWrite ? "" : "Теперь у вас доступ только для просмотра. Отправка сообщений недоступна.");
         setIssue(null);
         failures = 0;
         retryAfter = 0;
-        setAiPending(data.aiPending);
-        setAiRuns(data.aiRuns);
+        setAiRuns(current=>mergeChatAiRuns(current,data.aiRuns,data.messages.map(message=>message.id),channelMemberId));
         const previous = messagesRef.current;
         const merged = mergeMessages(previous, data.messages, taskId, channelMemberId);
         if (!pageInitializedRef.current || !previous.length) {
@@ -226,7 +226,7 @@ export function MessageFeed({ taskId, channelMemberId, viewerMemberId, initialMe
       activeController?.abort();
       olderControllerRef.current?.abort();
     };
-  }, [taskId, channelMemberId, viewerMemberId, goToLatest, rememberPosition, showIssue, notifyAccess]);
+  }, [taskId, channelMemberId, viewerMemberId, canWrite, goToLatest, rememberPosition, showIssue, notifyAccess]);
 
   async function loadEarlier() {
     if (!pageInfo.hasMore || !pageInfo.beforeCursor || olderControllerRef.current || terminalRef.current) return;
@@ -251,6 +251,9 @@ export function MessageFeed({ taskId, channelMemberId, viewerMemberId, initialMe
       }
       const data = parseFeedPayload(await response.json(), taskId, channelMemberId);
       if (!mountedRef.current || controller.signal.aborted) return;
+      setAiRuns(current=>mergeChatAiRuns(current,data.aiRuns,data.messages.map(message=>message.id),channelMemberId));
+      setWriteAllowed(canWrite && data.canWrite);
+      notifyAccess(data.canWrite,data.canWrite?"":"Теперь у вас доступ только для просмотра. Отправка сообщений недоступна.");
       rememberPosition();
       const previous = messagesRef.current;
       const merged = mergeMessages(previous, data.messages, taskId, channelMemberId);
@@ -271,14 +274,13 @@ export function MessageFeed({ taskId, channelMemberId, viewerMemberId, initialMe
   }
 
   function quote(message: ChatMessage) {
-    if (!canWrite || terminalRef.current) return;
+    if (!writeAllowed || terminalRef.current) return;
     window.dispatchEvent(new CustomEvent("ruli:quote-message", { detail: {
       taskId, channelMemberId: channelKey(channelMemberId), authorName: message.authorName, body: message.body,
     } }));
   }
 
   const blocked = Boolean(issue && !issue.retryable);
-  const retries = aiRuns.filter(run => run.canRetry && run.status === "failed");
   const returnPath = taskPagePath(taskId, { chat: channelMemberId || "general" });
   return <div className="message-feed">
     <div className="chat-feed-toolbar">
@@ -307,13 +309,14 @@ export function MessageFeed({ taskId, channelMemberId, viewerMemberId, initialMe
         const showDay = index === 0 || day !== messageDayKey(shownMessages[index - 1].createdAt);
         return <Fragment key={message.id}>
           {showDay ? <li className="message-day-separator" role="presentation"><span>{messageDayLabel(message.createdAt)}</span></li> : null}
-          <MessageItem message={message} member={memberMap.get(message.authorId)} mine={message.authorId === viewerMemberId} canWrite={canWrite && !blocked} onQuote={quote}/>
+          <MessageItem message={message} member={memberMap.get(message.authorId)} mine={message.authorId === viewerMemberId} canWrite={writeAllowed && !blocked} onQuote={quote}/>
         </Fragment>;
       })}
     </ol>
     {!shownMessages.length ? <p className="empty-copy">{normalizedQuery ? "В загруженной переписке совпадений нет. Измените запрос или загрузите более ранние сообщения." : "Здесь пока нет сообщений. Начните обсуждение задачи."}</p> : null}
     {newIds.length || (!atBottom && messages.length) ? <button type="button" className="chat-new-messages" onClick={goToLatest}><ArrowDown aria-hidden="true"/>{newIds.length ? `Новые сообщения · ${newIds.length}` : "К последним сообщениям"}</button> : null}
     {aiPending > 0 && !blocked ? <p className="chat-ai-status" role="status"><Bot aria-hidden="true"/>AI готовит ответ{aiPending > 1 ? ` · запросов: ${aiPending}` : ""}. Он появится здесь после завершения.</p> : null}
-    {retries.length > 0 && canWrite && !blocked ? <div className="chat-ai-retries">{retries.map(run => <AiChatRetry key={run.id} taskId={taskId} run={run} clientId={`retry-${run.id}`}/>)}</div> : null}
+    {canWrite&&!writeAllowed&&!blocked?<p className="chat-read-only">Теперь у вас доступ только для просмотра. Переписка продолжает обновляться.</p>:null}
+    {!blocked?<ChatAiFeedback taskId={taskId} runs={aiRuns} members={members} canWrite={writeAllowed}/>:null}
   </div>;
 }

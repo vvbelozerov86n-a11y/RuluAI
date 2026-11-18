@@ -19,7 +19,7 @@ function createStore(key: string, initialClientId: string) {
     let persistent = true;
     try {
       // Save the current draft and recovery texts atomically in one storage item.
-      if (draft.body||unsent.length) window.sessionStorage.setItem(key, JSON.stringify({...draft,unsent}));
+      if (draft.body||draft.botMemberId||unsent.length) window.sessionStorage.setItem(key, JSON.stringify({...draft,unsent}));
       else window.sessionStorage.removeItem(key);
     } catch { persistent = false; }
     snapshot = {draft, unsent, persistent};
@@ -33,6 +33,12 @@ function createStore(key: string, initialClientId: string) {
       const next = editDraft(snapshot.draft, body, crypto.randomUUID());
       if (next !== snapshot.draft) save(next);
     },
+    selectBot(botMemberId: string) {
+      const current = snapshot.draft;
+      if ((current.botMemberId ?? "") !== botMemberId) {
+        save({body:current.body,clientId:crypto.randomUUID(),...(botMemberId ? {botMemberId} : {})});
+      }
+    },
     acknowledge(clientId: string) {
       const next = acknowledgeDraft(snapshot.draft, clientId, crypto.randomUUID());
       const unsent=snapshot.unsent.filter(item=>item.clientId!==clientId);
@@ -41,15 +47,16 @@ function createStore(key: string, initialClientId: string) {
     preserveUnsent(draft:ChatDraft) {
       if(!draft.body.trim()||snapshot.unsent.some(item=>item.clientId===draft.clientId))return;
       const clientId=/^[a-zA-Z0-9_-]{8,120}$/.test(draft.clientId)?draft.clientId:crypto.randomUUID();
-      save(snapshot.draft,[...snapshot.unsent,{body:draft.body,clientId}]);
+      save(snapshot.draft,[...snapshot.unsent,{...draft,clientId}]);
     },
-    restoreUnsent(clientId:string):"restored"|"too-long"|"missing" {
+    restoreUnsent(clientId:string):"restored"|"too-long"|"different-recipient"|"missing" {
       const failed=snapshot.unsent.find(item=>item.clientId===clientId);
       if(!failed)return "missing";
       const current=snapshot.draft;
+      if (current.body && current.botMemberId !== failed.botMemberId) return "different-recipient";
       const body=current.body===failed.body?current.body:current.body?`${current.body}\n\n${failed.body}`:failed.body;
       if(body.length>5000)return "too-long";
-      const next=current.body===body?current:{body,clientId:current.body?crypto.randomUUID():failed.clientId};
+      const next=!current.body || current.body===failed.body ? failed : {...current,body,clientId:crypto.randomUUID()};
       save(next,snapshot.unsent.filter(item=>item.clientId!==clientId));
       return "restored";
     },

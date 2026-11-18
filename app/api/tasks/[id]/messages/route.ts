@@ -1,10 +1,11 @@
 import { getChatGPTUser } from "@/app/chatgpt-auth";
-import { requireAccess } from "@/lib/ruli/access";
+import { requireAccess, canWriteChannel } from "@/lib/ruli/access";
 import { taskPagePath } from "@/lib/ruli/return-path";
 import { loadTree } from "@/lib/ruli/data";
 import { findPath } from "@/lib/ruli/model";
-import { loadMessagePage, MessagePageError, type ChatAiRun } from "@/lib/ruli/collaboration";
+import { loadMessagePage, MessagePageError } from "@/lib/ruli/collaboration";
 import { loadTaskAi } from "@/lib/ruli/ai";
+import { projectChatAiRuns } from "@/lib/ruli/chat-ai";
 
 export const dynamic = "force-dynamic";
 const headers = {"Cache-Control":"private, no-store", "Vary":"Cookie"};
@@ -28,13 +29,11 @@ export async function GET(request:Request,{params}:{params:Promise<{id:string}>}
     const viewer=await requireAccess(taskPagePath(id));
     const node=findPath(id,await loadTree())?.at(-1);
     if (!node) return Response.json({error:"Задача не найдена"},{status:404,headers});
-    const ai=await loadTaskAi(node,viewer,channel??undefined);
-    const aiPending=ai.chatRuns.filter(run=>run.status==="pending").length;
-    const aiRuns:ChatAiRun[]=ai.chatRuns.map(run=>({
-      id:run.id,botMemberId:run.botMemberId,channelMemberId:run.channelMemberId,inputMessageId:run.inputMessageId,
-      error:run.error,status:run.status,canRetry:run.canRetry,createdAt:run.createdAt,finishedAt:run.finishedAt,
-    }));
-    return Response.json({...page,aiPending,aiRuns},{headers});
+    const messageIds=page.messages.map(message=>message.id);
+    const ai=await loadTaskAi(node,viewer,channel??undefined,messageIds);
+    const aiRuns=projectChatAiRuns(ai.chatRuns,id,channel,messageIds);
+    const aiPending=aiRuns.filter(run=>run.status==="pending").length;
+    return Response.json({...page,aiPending,aiRuns,canWrite:canWriteChannel(viewer,channel)},{headers});
   }
   catch(error) {
     if(error instanceof MessagePageError)return Response.json({error:error.message},{status:error.status,headers});

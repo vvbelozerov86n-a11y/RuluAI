@@ -184,6 +184,9 @@ export function planMessageEvents(
   const events: { agent: AgentRef; event: AgentEventType }[] = mentioned.map(agent => ({ agent, event: "bot.mentioned" }));
   for (const agent of assigned) {
     if (mentionedIds.has(agent.memberId)) continue;
+    // An agent's ordinary reply is for people. Forward only explicit mentions
+    // to other agents, otherwise their automatic replies can trigger a loop.
+    if (message.authorKind === "bot") continue;
     events.push({ agent, event: "message.created" });
   }
   return events;

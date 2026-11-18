@@ -160,6 +160,11 @@
 .chat-workspace .chat-ai-status svg { width: 16px; height: 16px; flex-shrink: 0; }
 .chat-workspace .chat-ai-retries { min-width: 0; margin-bottom: 14px; }
 .chat-workspace .chat-ai-retries .ai-chat-retry { margin-top: 9px; }
+.chat-workspace .chat-ai-saved { min-width: 0; border: 1px solid #826f50; border-radius: 10px; padding: 14px; margin-top: 12px; background: #332f28; overflow-wrap: anywhere; }
+.chat-workspace .chat-ai-saved h3 { font-size: 14px; margin: 0 0 8px; }
+.chat-workspace .chat-ai-saved > p { font-size: 13px; line-height: 1.6; color: #ddcfb6; }
+.chat-workspace .chat-ai-saved summary { display: flex; align-items: center; min-height: 44px; cursor: pointer; font-size: 13px; color: #e7dfce; }
+.chat-workspace .chat-ai-saved .chat-ai-output { max-height: 360px; overflow: auto; }
 .chat-workspace .chat-search-highlight { color: #122b22; background: #d4d7a9; border-radius: 2px; padding: 0 1px; }
 .chat-workspace .empty-copy { min-height: 240px; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; gap: 10px; max-width: 340px; padding: 24px 12px; margin: 0 auto; color: var(--chat-muted); font-size: 13px; line-height: 1.7; }
 

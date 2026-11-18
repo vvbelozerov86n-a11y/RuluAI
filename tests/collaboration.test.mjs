@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import * as policy from "../lib/ruli/policy.ts";
 import { notifyGrokBotMessage } from "../lib/ruli/agent-webhook.ts";
+import { projectChatAiRuns } from "../lib/ruli/chat-ai.ts";
 import { barrier, collaborationHarness, loadModule, makeForm, plain, redirectMessage, TestRedirect } from "./collaboration-helper.mjs";
 
 function fixture(t) { const h = collaborationHarness(); t.after(() => h.close()); return h; }
@@ -9,7 +10,7 @@ const message = (overrides = {}) => ({ taskId: "launch", channelMemberId: "", bo
 const plan = (overrides = {}) => ({ taskId: "launch", version: 0, startDate: "2026-11-17", hoursPerDay: 8, estimatedHoursPerTask: 4, weekdaysOnly: "on", ...overrides });
 const editEntry = (entry, overrides = {}) => ({ taskId: entry.plan_task_id, id: entry.id, version: entry.version, planVersion: 1, startDate: entry.start_date, endDate: entry.end_date, hours: entry.hours, ...overrides });
 
-test("channel policy: manager and matching executor can access private messages; viewer is read-only", () => {
+test("channel policy: manager and matching recipient can read private messages; viewer cannot write", () => {
   const anna = { role: "executor", memberId: "anna" };
   const manager = { role: "manager", memberId: "me" };
   const viewer = { role: "viewer", memberId: "anna" };
@@ -17,9 +18,11 @@ test("channel policy: manager and matching executor can access private messages;
   assert.equal(policy.canReadChannel(anna, "max"), false);
   assert.equal(policy.canReadChannel(manager, "anna"), true);
   assert.equal(policy.canWriteChannel(manager, "anna"), true);
-  assert.equal(policy.canReadChannel(viewer, "anna"), false);
+  assert.equal(policy.canReadChannel(viewer, "anna"), true);
+  assert.equal(policy.canReadChannel(viewer, "max"), false);
   assert.equal(policy.canReadChannel(viewer, null), true);
   assert.equal(policy.canWriteChannel(viewer, null), false);
+  assert.equal(policy.canWriteChannel(viewer, "anna"), false);
   assert.equal(policy.canSubmit(anna, { ownerId: "max", participants: ["anna"] }), true);
   assert.equal(policy.canSubmit(anna, { ownerId: "max", participants: [] }), false);
 });
@@ -167,7 +170,7 @@ test("history rejects a deleted task and a task hidden by its deleted ancestor",
 function historyRoute(h, extra={}) {
   const pages=messagePages(h);
   return loadModule("app/api/tasks/[id]/messages/route.ts",{
-    ...h.common,...pages,getChatGPTUser:async()=>({userId:"signed-in"}),
+    ...h.common,...pages,projectChatAiRuns,getChatGPTUser:async()=>({userId:"signed-in"}),
     loadTaskAi:async()=>({chatRuns:[]}),...extra,
   },["GET"]).GET;
 }
@@ -187,7 +190,8 @@ test("history HTTP endpoint exposes pagination and only safe current AI retry fi
   assert.equal(first.messages.length,100);
   assert.equal(first.hasMore,true);
   assert.equal(first.aiPending,1);
-  assert.deepEqual(Object.keys(first.aiRuns[0]).sort(),["id","botMemberId","channelMemberId","inputMessageId","error","status","canRetry","createdAt","finishedAt"].sort());
+  assert.deepEqual(Object.keys(first.aiRuns[0]).sort(),["id","botMemberId","channelMemberId","inputMessageId","error","status","canRetry","createdAt","finishedAt","output"].sort());
+  assert.equal(first.aiRuns[0].output,null);
   assert.equal(JSON.stringify(first).includes("not-for-client"),false);
   assert.equal(JSON.stringify(first).includes("private-provider-output"),false);
   run.status="failed";run.canRetry=true;run.error="Повторите запрос";run.finishedAt="2026-11-18T10:01:00.000Z";
@@ -198,8 +202,7 @@ test("history HTTP endpoint exposes pagination and only safe current AI retry fi
   assert.equal(older.hasMore,false);
   assert.equal(older.beforeCursor,null);
   assert.equal(older.aiPending,0);
-  assert.equal(older.aiRuns[0].canRetry,true);
-  assert.equal(older.aiRuns[0].status,"failed");
+  assert.deepEqual(older.aiRuns,[]);
 });
 
 test("history HTTP endpoint returns 400/401/403/404 without exposing messages or AI runs", async t => {
@@ -222,6 +225,48 @@ test("history HTTP endpoint returns 400/401/403/404 without exposing messages or
   assert.equal(signedOut.status,401);
 });
 
+test("history HTTP exposes saved stale output only inside its authorized task and private channel",async t=>{
+  const h=fixture(t);h.seedTask("bot-child",{parentId:"launch",ownerId:"analyst"});
+  seedHistory(h,1,{channel:"analyst"});
+  const run={id:"saved",kind:"chat",taskId:"launch",channelMemberId:"analyst",botMemberId:"analyst",inputMessageId:"history-0001",status:"stale",canRetry:true,
+    error:"changed",output:"PRIVATE_STALE_OUTPUT",createdAt:"2026-11-18",finishedAt:"2026-11-18",requesterUserId:"PRIVATE_REQUESTER",leaseToken:"PRIVATE_LEASE"};
+  let loads=0;
+  const route=historyRoute(h,{loadTaskAi:async()=>{loads++;return {chatRuns:[run,{...run,id:"foreign",taskId:"other",output:"FOREIGN_TASK_OUTPUT"}]};}});
+  const get=channel=>route(new Request(`https://ruli.test/api/tasks/launch/messages?channel=${channel}`),{params:Promise.resolve({id:"launch"})});
+  const own=await get("analyst"),body=await own.json();
+  assert.equal(own.status,200);assert.equal(body.aiRuns.length,1);assert.equal(body.aiRuns[0].output,"PRIVATE_STALE_OUTPUT");
+  assert.doesNotMatch(JSON.stringify(body),/PRIVATE_REQUESTER|PRIVATE_LEASE|FOREIGN_TASK_OUTPUT/);
+  const general=await get("general");assert.deepEqual((await general.json()).aiRuns,[]);
+  h.as("max");const before=loads,denied=await get("analyst");
+  assert.equal(denied.status,403);assert.equal(loads,before);assert.doesNotMatch(JSON.stringify(await denied.json()),/PRIVATE_STALE_OUTPUT/);
+});
+
+test("an open own channel stays readable after executor becomes viewer but reports live write denial",async t=>{
+  const h=fixture(t);seedHistory(h,1,{channel:"anna"});h.as("anna");
+  const route=historyRoute(h);
+  const get=()=>route(new Request("https://ruli.test/api/tasks/launch/messages?channel=anna"),{params:Promise.resolve({id:"launch"})});
+  const before=await get();assert.equal(before.status,200);assert.equal((await before.json()).canWrite,true);
+  h.sqlite.exec("UPDATE team_accounts SET role='viewer' WHERE member_id='anna'");
+  const after=await get(),data=await after.json();assert.equal(after.status,200);assert.equal(data.messages.length,1);assert.equal(data.canWrite,false);
+});
+
+test("history API scopes AI text to each actual latest or older message page",async t=>{
+  const h=fixture(t);seedHistory(h,250);
+  const base={kind:"chat",taskId:"launch",channelMemberId:null,botMemberId:"analyst",status:"stale",error:"changed",output:"X".repeat(1000),canRetry:true,createdAt:"2026-11-18",finishedAt:"2026-11-18"};
+  const runs=Array.from({length:250},(_,i)=>({...base,id:`run-${i+1}`,inputMessageId:`history-${String(i+1).padStart(4,"0")}`}));
+  const scopes=[];
+  const route=historyRoute(h,{loadTaskAi:async(_node,_viewer,_channel,ids)=>{scopes.push([...ids]);return {chatRuns:runs};}});
+  const get=before=>route(new Request(`https://ruli.test/api/tasks/launch/messages?channel=general${before?`&before=${encodeURIComponent(before)}`:""}`),{params:Promise.resolve({id:"launch"})});
+  const latest=await (await get()).json();
+  assert.equal(latest.messages.length,100);assert.equal(latest.aiRuns.length,100);
+  assert.deepEqual(scopes[0],latest.messages.map(message=>message.id));
+  assert.ok(JSON.stringify(latest.aiRuns).length<140000);assert.equal(latest.aiRuns.some(run=>run.id==="run-1"),false);
+  const older=await (await get(latest.beforeCursor)).json();
+  assert.equal(older.aiRuns.length,100);assert.deepEqual(scopes[1],older.messages.map(message=>message.id));
+  assert.equal(older.aiRuns.some(run=>run.id==="run-250"),false);
+  assert.ok(older.aiRuns.every(run=>older.messages.some(message=>message.id===run.inputMessageId)));
+});
+
 test("history HTTP endpoint converts revoked team access into JSON 403 without redirecting", async t => {
   const h=fixture(t);
   const {redirect}=await import("../node_modules/vinext/dist/shims/navigation-errors.js");
@@ -231,7 +276,7 @@ test("history HTTP endpoint converts revoked team access into JSON 403 without r
   },["requireAccess"]);
   const pages=loadModule("lib/ruli/collaboration.ts",{...h.common,...access},["loadMessagePage","MessagePageError"]);
   const route=loadModule("app/api/tasks/[id]/messages/route.ts",{
-    ...h.common,...access,...pages,getChatGPTUser:async()=>identity,loadTaskAi:async()=>({chatRuns:[]}),
+    ...h.common,...access,...pages,projectChatAiRuns,getChatGPTUser:async()=>identity,loadTaskAi:async()=>({chatRuns:[]}),
   },["GET"]).GET;
   const request=new Request("https://ruli.test/api/tasks/launch/messages?channel=general");
   assert.equal((await route(request,{params:Promise.resolve({id:"launch"})})).status,200);
@@ -585,4 +630,33 @@ test("clearTaskSchedule serializes stale tabs and releases tasks for an ancestor
   assert.equal(redirectMessage(await h.invoke("generateTaskSchedule", plan({ taskId: "root" }))), null);
   assert.equal(h.one("SELECT SUM(hours) AS hours FROM schedule_entries WHERE task_id='letter'").hours, 4);
   assert.equal(h.one("SELECT COUNT(DISTINCT plan_task_id) AS count FROM schedule_entries WHERE task_id='letter'").count, 1);
+});
+
+test("assigned observers read their own latest and older private messages without gaining write access",async t=>{
+  const h=fixture(t);
+  h.sqlite.prepare("INSERT INTO task_participants(task_id,member_id) VALUES('letter','observer')").run();
+  const node=h.common.findPath("letter",await h.loadTree()).at(-1);
+  const sent=await h.actions.sendMessageState({},makeForm(message({taskId:"letter",channelMemberId:"observer",clientId:"observer-manager-message"})));
+  assert.equal(sent.sentClientId,"observer-manager-message");
+  for(let index=0;index<101;index++)h.sqlite.prepare(`INSERT INTO task_messages
+    (id,task_id,channel_member_id,author_id,author_user_id,author_name,body,client_id,created_at)
+    VALUES(?,'letter','observer','me','user-manager','Manager',?,?,'2026-11-18T01:00:00Z')`)
+    .run(`observer-history-${index}`,`Message ${index}`,`observer-history-client-${index}`);
+  h.as("viewer");
+  const viewer=await h.access.requireAccess();
+  const view=await h.collaboration.loadTaskCollaboration(node,viewer,"observer");
+  assert.deepEqual(plain(view.channels.map(member=>member.id)),["observer"]);
+  assert.equal(view.messages.length,100);assert.equal(view.messagePage.hasMore,true);
+  const pages=loadModule("lib/ruli/collaboration.ts",h.common,["loadMessagePage"]);
+  const earlier=await pages.loadMessagePage("letter","observer",view.messagePage.beforeCursor);
+  assert.equal(earlier.messages.length,2);
+  assert.ok([...view.messages,...earlier.messages].every(item=>item.channelMemberId==="observer"));
+  await assert.rejects(pages.loadMessagePage("letter","anna"),error=>error.status===403);
+  const before=h.one("SELECT COUNT(*) n FROM task_messages").n;
+  const blocked=await h.actions.sendMessageState({},makeForm(message({taskId:"letter",channelMemberId:"observer",clientId:"observer-cannot-send"})));
+  assert.match(blocked.error,/нет доступа/);
+  assert.equal(h.one("SELECT COUNT(*) n FROM task_messages").n,before);
+  h.sqlite.prepare("DELETE FROM task_participants WHERE task_id='letter' AND member_id='observer'").run();
+  await assert.rejects(pages.loadMessagePage("letter","observer"),error=>error.status===403);
+  await assert.rejects(pages.loadMessagePage("letter","observer",view.messagePage.beforeCursor),error=>error.status===403);
 });

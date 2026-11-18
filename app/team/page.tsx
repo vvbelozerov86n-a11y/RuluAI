@@ -4,7 +4,7 @@ import {requireAccess,canManage,listAccessAccounts} from "@/lib/ruli/access";
 import {chatGPTSignInPath} from "@/app/chatgpt-auth";
 import {Avatar} from "@/components/ruli/ui";
 import {Toasts} from "@/components/ruli/views";
-import {TeamRegistration,TeamSignInLink} from "@/components/ruli/team-registration";
+import {PendingEmailCorrection,TeamRegistration,TeamSignInLink} from "@/components/ruli/team-registration";
 import {AiSettings} from "@/components/ruli/ai-settings";
 import {loadBotSettings} from "@/lib/ruli/ai";
 import "@/components/ruli/team-management.css";
@@ -32,7 +32,7 @@ export default async function TeamPage({searchParams}:{searchParams:Promise<Reco
           <ol><li>Зарегистрируйте сотрудника в форме выше.</li><li>Владелец сайта отдельно разрешает сотруднику доступ к сайту в настройках Sites. Регистрация в Рули не меняет доступ к самому сайту.</li><li>Передайте ссылку для входа. Сотрудник должен войти через ChatGPT с указанной при регистрации почтой.</li></ol>
           <TeamSignInLink signInPath={chatGPTSignInPath("/")}/>
         </aside>
-        {accounts.length?<details className="team-accounts"><summary>Зарегистрированные аккаунты · {accounts.length}</summary><ul className="account-list">{accounts.map(account=><li key={account.email}><strong>{account.name}</strong><span>{account.email}</span><small>{account.role==="manager"?"Руководитель":account.role==="executor"?"Исполнитель":"Наблюдатель"} · {account.userId?"Вход выполнен":"Ожидается первый вход"}</small></li>)}</ul></details>:null}
+        {accounts.length?<details className="team-accounts"><summary>Зарегистрированные аккаунты · {accounts.length}</summary><ul className="account-list">{accounts.map(account=><li key={account.email}><strong>{account.name}</strong><span>{account.email}</span><small>{account.role==="manager"?"Руководитель":account.role==="executor"?"Исполнитель":"Наблюдатель"} · {account.userId?"Вход выполнен":"Ожидается первый вход"}</small>{!account.userId&&account.memberId!=="me"&&["executor","viewer"].includes(account.role)?<PendingEmailCorrection memberId={account.memberId} email={account.email}/>:null}</li>)}</ul></details>:null}
       </section>
     </>:<p className="detail-note">Сотрудников регистрирует и настраивает AI-ботов руководитель команды.</p>}
     <section className="team-people" aria-labelledby="team-people-title"><h2 id="team-people-title">Люди в команде</h2>{humans.map(member=><div className="member-row" key={member.id}><Avatar member={member}/><div>{member.name}<small>{member.role}</small></div></div>)}</section>

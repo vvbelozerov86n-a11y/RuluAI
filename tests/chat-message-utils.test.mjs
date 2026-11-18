@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  advanceHistory, channelKey, createHistoryProgress, feedIssueForStatus, formatQuote, historyPageInfo, linkedTextParts, mergeMessages, messageDayKey,
+  advanceHistory, channelKey, createHistoryProgress, feedIssueForStatus, formatQuote, historyPageInfo, linkedTextParts, mergeChatAiRuns, mergeMessages, messageDayKey,
   messageDayLabel, newIncomingIds, normalizeMessageSearch, parseFeedPayload, parseMessageBlocks,
   observeHistoryHead, safeHttpUrl, searchMessages, shortMessageTime,
 } from "../components/ruli/chat-message-utils.ts";
@@ -12,8 +12,8 @@ function message(index, extra = {}) {
     createdAt: new Date(Date.UTC(2026, 10, 18, 0, 0, index)).toISOString(), ...extra };
 }
 const run = extra => ({ id: "run", botMemberId: "analyst", channelMemberId: null, inputMessageId: "message-0001",
-  error: "Не удалось получить ответ.", status: "failed", canRetry: true, createdAt: "2026-11-18T00:00:00Z", finishedAt: "2026-11-18T00:01:00Z", ...extra });
-const payload = extra => ({ messages: [message(1)], hasMore: false, beforeCursor: null, aiPending: 0, aiRuns: [], ...extra });
+  error: "Не удалось получить ответ.", status: "failed", output:null, canRetry: true, createdAt: "2026-11-18T00:00:00Z", finishedAt: "2026-11-18T00:01:00Z", ...extra });
+const payload = extra => ({ messages: [message(1)], hasMore: false, beforeCursor: null, aiPending: 0, aiRuns: [], canWrite:true, ...extra });
 
 test("history merges retain every loaded page when latest snapshots overlap or arrive out of order", () => {
   const initial = Array.from({ length: 100 }, (_, i) => message(i + 101));
@@ -190,4 +190,25 @@ test("feed payload validates history metadata and AI channel scope before render
   assert.throws(() => parseFeedPayload(payload({ messages: [message(1, { taskId: "other" })] }), "task"), /wrong-channel/);
   assert.throws(() => parseFeedPayload(payload({ aiRuns: [run({ channelMemberId: "private" })] }), "task"), /wrong-channel/);
   assert.equal(parseFeedPayload(payload({ aiPending: -10 }), "task").aiPending, 0);
+});
+
+test("feed payload carries live write denial without treating readable history as a terminal failure",()=>{
+  const result=parseFeedPayload(payload({canWrite:false}),"task");
+  assert.equal(result.canWrite,false);assert.equal(result.messages.length,1);
+  for(const value of [undefined,"true",1])assert.throws(()=>parseFeedPayload(payload({canWrite:value}),"task"),/invalid-messages/);
+});
+
+test("older-page stale AI output survives latest polling while refreshed page metadata replaces only its own runs",()=>{
+  const old=run({id:"old",inputMessageId:"old-question",status:"stale",output:"Saved older answer"});
+  const latest=run({id:"latest",inputMessageId:"new-question",status:"pending",error:null});
+  let loaded=mergeChatAiRuns([], [latest], ["new-question"]);
+  loaded=mergeChatAiRuns(loaded,[old],["old-question"]);
+  loaded=mergeChatAiRuns(loaded,[{...latest,status:"succeeded",canRetry:false}],["new-question"]);
+  assert.equal(loaded.find(item=>item.id==="old").output,"Saved older answer");
+  assert.equal(loaded.find(item=>item.id==="latest").status,"succeeded");
+  loaded=mergeChatAiRuns(loaded,[],["new-question"]);
+  assert.deepEqual(loaded,[old]);
+  assert.throws(()=>mergeChatAiRuns(loaded,[latest],["other-question"]),/wrong-ai-scope/);
+  assert.throws(()=>mergeChatAiRuns(loaded,[{...old,channelMemberId:"private"}],["old-question"]),/wrong-ai-scope/);
+  assert.throws(()=>parseFeedPayload(payload({aiRuns:[old]}),"task"),/wrong-ai-scope/);
 });

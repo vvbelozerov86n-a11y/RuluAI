@@ -43,3 +43,26 @@ export async function addTeamMember(form:FormData):Promise<void> {
   const state=await registerTeamMember(form);
   redirect(`/team?${state.error?"error":"flash"}=${encodeURIComponent(state.error||state.notice!)}#register-employee`);
 }
+
+/** Correct a registration typo only before the first verified sign-in. */
+export async function updatePendingEmailState(_previous:ActionState,form:FormData):Promise<ActionState> {
+  await requireManager("/team");
+  const email=String(form.get("email")??"").trim().toLowerCase();
+  const expectedEmail=String(form.get("expectedEmail")??"").trim().toLowerCase();
+  const memberId=String(form.get("memberId")??"").trim();
+  const fail=(error:string):ActionState=>({error,values:Object.fromEntries(["email","expectedEmail","memberId"].map(key=>[key,String(form.get(key)??"")]))});
+  const validEmail=(value:string)=>value.length<=254&&/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+  if(!validEmail(email))return fail("Введите корректную почту сотрудника.");
+  if(!validEmail(expectedEmail)||!memberId||memberId.length>150)return fail("Обновите список зарегистрированных аккаунтов.");
+  const db=getD1();
+  let changed=0;
+  try {
+    const result=await db.prepare(`UPDATE OR IGNORE team_accounts SET email=?
+      WHERE member_id=? AND email=? AND user_id IS NULL AND role IN ('executor','viewer')
+      AND EXISTS (SELECT 1 FROM members WHERE id=team_accounts.member_id AND type='human' AND id<>'me')`)
+      .bind(email,memberId,expectedEmail).run();
+    changed=result.meta.changes;
+  } catch {return fail("Не удалось сохранить почту. Введённый адрес сохранён; повторите попытку.");}
+  if(!changed)return fail("Почта уже занята или регистрация изменилась. Исправление доступно только до первого входа сотрудника. Обновите список аккаунтов.");
+  redirect(`/team?flash=${encodeURIComponent("Почта исправлена. Задачи и переписка сотрудника сохранены. Проверьте его доступ к сайту в Sites и передайте ссылку для входа.")}#register-employee`);
+}

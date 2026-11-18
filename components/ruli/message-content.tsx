@@ -33,7 +33,7 @@ export function MessageContent({ body }: { body: string }) {
     if (block.type === "quote") return <blockquote className="message-quote" key={index}><LinkedText text={block.text}/></blockquote>;
     if (block.type === "list") {
       const List = block.ordered ? "ol" : "ul";
-      return <List key={index}>{block.items.map((item, itemIndex) => <li key={itemIndex}><LinkedText text={item}/></li>)}</List>;
+      return <List key={index}>{block.items.map((item, itemIndex) => <li key={itemIndex} value={block.numbers?.[itemIndex]}><LinkedText text={item}/></li>)}</List>;
     }
     return <p key={index}><LinkedText text={block.text}/></p>;
   })}</div>;

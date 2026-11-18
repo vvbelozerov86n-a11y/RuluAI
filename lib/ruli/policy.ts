@@ -16,9 +16,10 @@ export function canSubmit(viewer: AccessContext, node: TaskNode): boolean {
     (node.ownerId === viewer.memberId || node.participants.includes(viewer.memberId)));
 }
 
-/** A direct task channel is accessible only to its executor and the manager. */
+/** A personal channel is readable by its assigned recipient and the manager. */
 export function canReadChannel(viewer: AccessContext, channel: string | null): boolean {
-  return channel === null || canManage(viewer) || (viewer.role === "executor" && viewer.memberId === channel);
+  return channel === null || canManage(viewer) ||
+    (["executor","viewer"].includes(viewer.role) && viewer.memberId === channel);
 }
 
 export function canWriteChannel(viewer: AccessContext, channel: string | null): boolean {

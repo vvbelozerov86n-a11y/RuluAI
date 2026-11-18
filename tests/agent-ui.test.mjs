@@ -65,6 +65,36 @@ const deliveryProps = rows => ({ rows, manager: true, taskId: "task", version: 3
 const panelProps = bot => ({ taskId: "task", version: 3, manager: true, clientId: "request-client-id", data: { bot, bots: [bot], runs: [], canRun: true, disabledReason: "External webhook agent" } });
 const composerProps = extra => ({ taskId: "task", viewerUserId: "manager", clientId: "message-client-id", mode: "view", ...extra });
 
+test("saved stale AI output is readable and escaped, with refresh only for its authorized requester",()=>{
+  const h=ui(),{ChatAiFeedback}=h.load("components/ruli/chat-ai-feedback.tsx");
+  const run={id:"stale",botMemberId:"agent-vk",channelMemberId:null,inputMessageId:"m",status:"stale",error:"changed",canRetry:true,
+    output:'<script>unsafe()</script> Сохранённый ответ',createdAt:"2026-11-18",finishedAt:"2026-11-18"};
+  const props={taskId:"task",runs:[run],members:[],canWrite:true};
+  const html=h.render(ChatAiFeedback,props);
+  assert.match(html,/Посмотреть сохранённый ответ/);assert.match(html,/Запросить новый ответ/);
+  assert.match(html,/name="runId" value="stale"/);assert.match(html,/&lt;script&gt;/);assert.doesNotMatch(html,/<script>unsafe/);
+  const readonly=h.render(ChatAiFeedback,{...props,canWrite:false});
+  assert.match(readonly,/Сохранённый ответ/);assert.doesNotMatch(readonly,/Запросить новый ответ|name="runId"/);
+  const other=h.render(ChatAiFeedback,{...props,runs:[{...run,canRetry:false}]});
+  assert.doesNotMatch(other,/Запросить новый ответ/);
+});
+
+test("group assignments distinguish direct membership and every active named descendant source",()=>{
+  const h=ui({imports:{"@/app/actions":{updateTaskState:action}}}),{TaskAssignments}=h.load("components/ruli/task-assignments.tsx");
+  const person={id:"anna",name:"Анна",type:"human",role:"Исполнитель",color:"rose",initials:"А"};
+  const bot={id:"analyst",name:"Модель",type:"bot",role:"Аналитик",color:"bot",initials:"AI"};
+  const leaf=(id,title,extra={})=>({id,title,kind:"leaf",ownerId:"analyst",participants:[],children:[],deletedAt:null,...extra});
+  const node={id:"group",title:"Группа",description:"",kind:"group",ownerId:"anna",participants:[],version:1,size:"wide",theme:"teal",dueDate:null,priority:null,
+    children:[leaf("a","Исследование"),leaf("b","Сводка"),leaf("deleted","Удалённая задача",{deletedAt:"2026-11-18"})]};
+  const html=h.render(TaskAssignments,{node,members:[person,bot],mode:"view"});
+  assert.match(html,/Назначены непосредственно/);assert.match(html,/Участвуют через подзадачи/);
+  assert.match(html,/href="\/t\/a\?mode=view#task-team"/);assert.match(html,/Исследование/);assert.match(html,/Сводка/);
+  assert.doesNotMatch(html,/Удалённая задача/);
+  assert.match(html,/Снятие прямого назначения ниже не убирает участие в подзадачах/);
+  const checkbox=[...html.matchAll(/<input\b[^>]*>/g)].map(match=>match[0]).find(tag=>tag.includes('value="analyst"'));
+  assert.ok(checkbox);assert.doesNotMatch(checkbox,/checked/);
+});
+
 test("delivery UI keeps each failed event retryable after later successes and shows pending delivery", () => {
   const h = ui();
   const { BotDeliveryStatus } = h.load("components/ruli/bot-delivery.tsx");

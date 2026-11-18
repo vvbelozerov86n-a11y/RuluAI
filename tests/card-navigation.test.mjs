@@ -31,7 +31,7 @@ function harness() {
   const chatCalls = [];
   const imports = {
     "next/link": { __esModule: true, default: props => React.createElement("a", props) },
-    "@/app/actions": { nestTask: noop, unnestTask: noop, moveTask: noop, setStatus: noop, retryBotWebhook: noop },
+    "@/app/actions": { nestTask: noop, unnestTask: noop, moveTask: noop, setStatus: noop, retryBotWebhook: noop, resizeTaskState: noop },
     "@/lib/ruli/access": { canManage: access => access.role === "manager" },
     "@/lib/ruli/ai": { loadTaskAi: async () => ({ bots: [], runs: [], chatRuns: [] }) },
     "./collaboration": { TaskCollaboration: props => { chatCalls.push(props); return React.createElement("section", { id: "discussion", "data-task-chat": props.node.id }); } },
@@ -107,7 +107,7 @@ test("card participant popovers and structure actions remain independent native 
   const h = harness();
   for (const node of [group, leaf]) {
     const html = render(h.TaskCard, { ...viewProps(node), mode: "build", index: 1, siblingCount: 3 });
-    assert.equal([...html.matchAll(/<summary\b/g)].length, 2);
+    assert.equal([...html.matchAll(/<summary\b[^>]*class="participant-square\b/g)].length, 2);
     assert.match(html, /aria-label="Люди: 1\./);
     assert.match(html, /aria-label="Боты: 1\./);
     assert.match(html, /href="\/t\/(?:group|leaf)\/edit\?mode=build"/);

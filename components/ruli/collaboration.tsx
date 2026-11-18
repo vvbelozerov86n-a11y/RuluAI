@@ -5,6 +5,7 @@ import { taskHref, type TaskNode, type Member, type ViewMode } from "@/lib/ruli/
 import { MessageComposer } from "./message-composer";
 import { MessageFeed } from "./message-feed";
 import {loadTaskAi} from "@/lib/ruli/ai";
+import {projectChatAiRuns} from "@/lib/ruli/chat-ai";
 import { Bot, LockKeyhole, MessageSquare, ShieldCheck } from "lucide-react";
 import { ChatChannels, type ChatChannelItem } from "./chat-channels";
 import "./chat.css";
@@ -14,15 +15,14 @@ export async function TaskCollaboration({node,members,viewer,channel,mode="view"
   let data=await loadTaskCollaboration(node,viewer,selected);
   const unavailable=Boolean(selected&&!data.channels.some(m=>m.id===selected));
   if(unavailable){selected=undefined;data=await loadTaskCollaboration(node,viewer);}
-  const ai=await loadTaskAi(node,viewer,selected);
-  const chatAiRuns=ai.chatRuns.map(({id,botMemberId,channelMemberId,inputMessageId,error,status,canRetry,createdAt,finishedAt})=>({
-    id,botMemberId,channelMemberId,inputMessageId,error,status,canRetry,createdAt,finishedAt,
-  }));
+  const messageIds=data.messages.map(message=>message.id);
+  const ai=await loadTaskAi(node,viewer,selected,messageIds);
+  const chatAiRuns=projectChatAiRuns(ai.chatRuns,node.id,selected??null,messageIds);
   const messageClientId=crypto.randomUUID();
   const manager=canManage(viewer);
   const selectedMember=data.channels.find(m=>m.id===selected);
   const selectedBot=selectedMember?.type==="bot"?ai.bots.find(bot=>bot.memberId===selected):undefined;
-  const ownExecutorChannel=viewer.role==="executor"&&selectedMember?.id===viewer.memberId;
+  const ownExecutorChannel=viewer.role!=="manager"&&selectedMember?.id===viewer.memberId;
   const chatTitle=ownExecutorChannel?"С руководителем":selectedMember?.name??"Общий чат";
   const providerName=(provider:string)=>provider==="xai"?"xAI · Grok":provider==="openai"?"OpenAI":provider==="grok-bot"?"Grok Bot":"AI-провайдер";
   const configuration=(bot:typeof selectedBot):ChatChannelItem["configuration"]=>!bot?{label:"Нужна настройка",state:"missing"}:!bot.enabled?{label:"Выключен",state:"disabled"}:!bot.configured?{label:bot.kind==="agent"?"Нет подключения":"Нужен ключ",state:"missing"}:!bot.ready?{label:"Недоступен",state:"disabled"}:{label:"Настроен",state:"ready"};
@@ -30,8 +30,8 @@ export async function TaskCollaboration({node,members,viewer,channel,mode="view"
   const chatHref=(id?:string)=>taskHref(node.id,mode)+"&chat="+encodeURIComponent(id??"general")+"#collaboration";
   const channels:ChatChannelItem[]=data.channels.map(member=>{
     const bot=member.type==="bot"?ai.bots.find(item=>item.memberId===member.id):undefined;
-    return {id:member.id,name:member.name,label:viewer.role==="executor"&&member.id===viewer.memberId?"С руководителем":member.name,
-      description:member.type==="bot"?providerName(bot?.provider??""):viewer.role==="executor"&&member.id===viewer.memberId?"Личный диалог":member.role||"Личный диалог",initials:member.initials,color:member.color,type:member.type,href:chatHref(member.id),
+    return {id:member.id,name:member.name,label:viewer.role!=="manager"&&member.id===viewer.memberId?"С руководителем":member.name,
+      description:member.type==="bot"?providerName(bot?.provider??""):viewer.role!=="manager"&&member.id===viewer.memberId?"Личный диалог":member.role||"Личный диалог",initials:member.initials,color:member.color,type:member.type,href:chatHref(member.id),
       configuration:member.type==="bot"?configuration(bot):undefined};
   });
   return <section className="collaboration" id="collaboration" aria-label="Обсуждение задачи">
@@ -58,7 +58,7 @@ export async function TaskCollaboration({node,members,viewer,channel,mode="view"
           <MessageFeed key={`feed:${viewer.userId}:${node.id}:${selected??"general"}`} taskId={node.id} channelMemberId={selected} viewerMemberId={viewer.memberId} initialMessages={data.messages} initialPage={data.messagePage} members={members} canWrite={viewer.role!=="viewer"} initialAiRuns={chatAiRuns}/>
         </div>
         <div className="chat-compose-area">
-          {viewer.role!=="viewer"?<MessageComposer key={`composer:${viewer.userId}:${node.id}:${selected??"general"}`} taskId={node.id} channelMemberId={selected} viewerUserId={viewer.userId} clientId={messageClientId} mode={mode} bots={ai.bots} privateBot={selectedBot}/>:<p className="chat-read-only"><LockKeyhole aria-hidden="true"/>У вас доступ для просмотра обсуждения.</p>}
+          {viewer.role!=="viewer"?<MessageComposer key={`composer:${viewer.userId}:${node.id}:${selected??"general"}`} taskId={node.id} channelMemberId={selected} viewerUserId={viewer.userId} clientId={messageClientId} mode={mode} bots={ai.bots} privateBot={selectedBot} aiDisabledReason={ai.chatDisabledReason}/>:<p className="chat-read-only"><LockKeyhole aria-hidden="true"/>{ownExecutorChannel?"Вы можете читать свой диалог с руководителем. Отправка сообщений недоступна для роли наблюдателя.":"У вас доступ для просмотра обсуждения."}</p>}
         </div>
       </div>
     </section>

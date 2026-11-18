@@ -4,6 +4,7 @@ import fs from "node:fs";
 import {collaborationHarness,loadModule,makeForm,TestRedirect,plain} from "./collaboration-helper.mjs";
 import * as provider from "../lib/ruli/ai-provider.ts";
 import * as mutations from "../lib/ruli/mutations.ts";
+import {projectChatAiRuns} from "../lib/ruli/chat-ai.ts";
 
 function exported(file) {
   return [...fs.readFileSync(new URL(`../${file}`,import.meta.url),"utf8").matchAll(/^export\s+(?:async\s+)?(?:function|const|class)\s+(\w+)/gm)].map(match=>match[1]);
@@ -189,6 +190,110 @@ test("AI config change during generation retains output without publishing it",a
   h.respond(async()=>{h.sqlite.prepare("UPDATE bot_configs SET enabled=0,version=version+1 WHERE member_id='analyst'").run();return {text:"Устаревший ответ",inputTokens:1,outputTokens:1};});
   const run=await h.ai.requestAiReply(chatRequest(m));assert.equal(run.status,"stale");
   assert.equal(h.all("SELECT id FROM task_messages WHERE author_id='analyst'").length,0);assert.equal(run.output,"Устаревший ответ");
+  const node=h.common.findPath("ai-task",await h.loadTree()).at(-1);
+  assert.equal((await h.ai.loadTaskAi(node,{})).chatRuns.find(item=>item.id===run.id).canRetry,false);
+  await assert.rejects(()=>h.ai.retryAiChat(chatRequest(m,{runId:run.id})),/выключен/);
+  h.sqlite.exec("UPDATE bot_configs SET enabled=1,model='updated-model',version=version+1 WHERE member_id='analyst'");
+  h.respond(async()=>({text:"Ответ новой модели",inputTokens:1,outputTokens:1}));
+  const fresh=await h.ai.retryAiChat(chatRequest(m,{runId:run.id}));
+  assert.equal(fresh.status,"succeeded");assert.notEqual(fresh.id,run.id);assert.equal(h.requests.at(-1).model,"updated-model");
+  assert.equal(h.one("SELECT output FROM ai_runs WHERE id=?",run.id).output,"Устаревший ответ");
+});
+
+test("inherited group executors receive an explicit chat AI restriction without changing provider readiness",async t=>{
+  const h=harness(t);h.seedTask("group-model",{parentId:"launch",ownerId:"analyst"});h.as("max");
+  const group=h.common.findPath("launch",await h.loadTree()).at(-1);
+  const data=await h.ai.loadTaskAi(group,{role:"manager"});
+  assert.match(data.chatDisabledReason,/назначенные непосредственно/);
+  assert.equal(data.bots.find(bot=>bot.memberId==="analyst").ready,true);
+  const plainReply=await h.chat.sendMessageState({},makeForm({taskId:"launch",body:"Для команды",clientId:"group-plain-001"}));
+  assert.equal(plainReply.sentClientId,"group-plain-001");
+  const blocked=await h.chat.sendMessageState({},makeForm({taskId:"launch",body:"Для модели",clientId:"group-model-001",botMemberId:"analyst"}));
+  assert.match(blocked.error,/назначенные непосредственно/);assert.equal(h.requests.length,0);
+  h.sqlite.exec("INSERT INTO task_participants(task_id,member_id) VALUES ('launch','max')");
+  assert.equal((await h.ai.loadTaskAi(group,{})).chatDisabledReason,null);
+});
+
+test("stale private output survives reload but is absent from general, foreign and revoked channels",async t=>{
+  const h=harness(t),message=h.human({channel:"analyst"});
+  h.respond(async()=>{h.sqlite.exec("UPDATE tasks SET version=version+1 WHERE id='ai-task'");return {text:"PRIVATE_STALE_ANSWER",inputTokens:1,outputTokens:2};});
+  const run=await h.ai.requestAiReply(chatRequest(message,{channelMemberId:"analyst"}));
+  assert.equal(run.status,"stale");
+  const node=h.common.findPath("ai-task",await h.loadTree()).at(-1);
+  const own=await h.ai.loadTaskAi(node,{},"analyst");
+  assert.equal(projectChatAiRuns(own.chatRuns,node.id,"analyst")[0].output,"PRIVATE_STALE_ANSWER");assert.equal(own.chatRuns[0].canRetry,true);
+  assert.equal((await h.ai.loadTaskAi(node,{})).chatRuns.length,0);
+  h.as("anna");assert.equal((await h.ai.loadTaskAi(node,{role:"manager"},"analyst")).chatRuns.length,0);
+  await assert.rejects(()=>h.ai.retryAiChat(chatRequest(message,{channelMemberId:"analyst",runId:run.id})),/нет доступа/);
+  h.as("manager");h.sqlite.exec("UPDATE tasks SET owner_id='anna',version=version+1 WHERE id='ai-task'");
+  assert.equal((await h.ai.loadTaskAi(node,{},"analyst")).chatRuns.length,0);
+  await assert.rejects(()=>h.ai.retryAiChat(chatRequest(message,{channelMemberId:"analyst",runId:run.id})),/назначен/);
+  assert.equal(h.requests.length,1);
+});
+
+test("refreshing stale chat preserves its original row, uses current context and deduplicates concurrent retries",async t=>{
+  const h=harness(t),message=h.human({channel:"analyst",body:"Исходный вопрос"});
+  h.respond(async()=>{h.sqlite.exec("UPDATE tasks SET version=version+1 WHERE id='ai-task'");return {text:"Сохранённый старый ответ",inputTokens:1,outputTokens:2};});
+  const old=await h.ai.requestAiReply(chatRequest(message,{channelMemberId:"analyst"}));
+  const original=h.one("SELECT * FROM ai_runs WHERE id=?",old.id);
+  h.sqlite.exec("UPDATE tasks SET description='АКТУАЛЬНЫЙ КОНТЕКСТ',version=version+1 WHERE id='ai-task'");
+  h.human({channel:"analyst",body:"НОВОЕ УТОЧНЕНИЕ"});
+  let release,started;const gate=new Promise(resolve=>{release=resolve;}),ready=new Promise(resolve=>{started=resolve;});
+  h.respond(async()=>{started();await gate;return {text:"Новый ответ",inputTokens:2,outputTokens:3};});
+  const request=chatRequest(message,{channelMemberId:"analyst",runId:old.id,clientId:"refresh-stale-001"});
+  const first=h.ai.retryAiChat(request);await ready;
+  const duplicate=await h.ai.retryAiChat({...request,clientId:"refresh-stale-002"});
+  assert.equal(duplicate.status,"pending");assert.notEqual(duplicate.id,old.id);
+  release();const fresh=await first;assert.equal(fresh.id,duplicate.id);assert.equal(fresh.status,"succeeded");
+  assert.deepEqual(h.one("SELECT * FROM ai_runs WHERE id=?",old.id),original);
+  const sent=JSON.stringify(h.requests.at(-1).messages);
+  assert.match(sent,/АКТУАЛЬНЫЙ КОНТЕКСТ/);assert.match(sent,/НОВОЕ УТОЧНЕНИЕ/);assert.match(sent,/Исходный вопрос/);
+  assert.equal((await h.ai.retryAiChat(request)).id,fresh.id);assert.equal(h.requests.length,2);
+  assert.equal(h.all("SELECT id FROM task_messages WHERE author_id='analyst'").length,1);
+  const view=await h.ai.loadTaskAi(h.common.findPath("ai-task",await h.loadTree()).at(-1),{},"analyst");
+  assert.equal(view.chatRuns.find(run=>run.id===old.id).canRetry,false);
+  assert.equal(projectChatAiRuns(view.chatRuns,"ai-task","analyst").find(run=>run.id===old.id).output,original.output);
+});
+
+test("a failed stale refresh retries its own row and does not discard the saved original output",async t=>{
+  const h=harness(t),message=h.human();
+  h.respond(async()=>{h.sqlite.exec("UPDATE tasks SET version=version+1 WHERE id='ai-task'");return {text:"Old retained output",inputTokens:1,outputTokens:2};});
+  const old=await h.ai.requestAiReply(chatRequest(message));
+  h.respond(async()=>{throw new provider.AiProviderError("unavailable");});
+  const failed=await h.ai.retryAiChat(chatRequest(message,{runId:old.id}));assert.equal(failed.status,"failed");assert.notEqual(failed.id,old.id);
+  h.respond(async()=>({text:"New output",inputTokens:1,outputTokens:2}));
+  const fresh=await h.ai.retryAiChat(chatRequest(message,{runId:failed.id}));assert.equal(fresh.id,failed.id);assert.equal(fresh.status,"succeeded");
+  assert.equal(h.one("SELECT output FROM ai_runs WHERE id=?",old.id).output,"Old retained output");
+});
+
+test("chat AI reads only the requested message page while retaining its old saved output",async t=>{
+  const h=harness(t),message=h.human();
+  h.respond(async()=>{h.sqlite.exec("UPDATE tasks SET version=version+1 WHERE id='ai-task'");return {text:"Persisted old output",inputTokens:1,outputTokens:2};});
+  const stale=await h.ai.requestAiReply(chatRequest(message));
+  const row=h.one("SELECT * FROM ai_runs WHERE id=?",stale.id);
+  for(let i=0;i<350;i++) {
+    const copy={...row,id:`newer-run-${i}`,request_key:`newer-key-${i}`,input_message_id:`unloaded-input-${i}`,status:i%2?"stale":"failed",output:"UNLOADED_OUTPUT".repeat(300),created_at:"2026-12-01T00:00:00Z"};
+    h.sqlite.prepare(`INSERT INTO ai_runs (${Object.keys(copy).join(",")}) VALUES (${Object.keys(copy).map(()=>"?").join(",")})`).run(...Object.values(copy));
+  }
+  h.queried.length=0;
+  const node=h.common.findPath("ai-task",await h.loadTree()).at(-1);
+  const data=await h.ai.loadTaskAi(node,{},null,[message.id]);
+  assert.equal(data.chatRuns.find(run=>run.id===stale.id).output,"Persisted old output");
+  assert.equal(data.chatRuns.length,1);assert.ok(JSON.stringify(projectChatAiRuns(data.chatRuns,"ai-task",null,[message.id])).length<1500);
+  assert.ok(h.queried.some(query=>/input_message_id IN/.test(query.sql)&&query.values.includes(JSON.stringify([message.id]))));
+  assert.ok(h.queried.some(query=>/refreshed.request_key=json_array/.test(query.sql)));
+  assert.equal(h.queried.some(query=>/^SELECT request_key AS requestKey FROM ai_runs/.test(query.sql)),false);
+  assert.equal((await h.ai.loadTaskAi(node,{},null,[])).chatRuns.length,0);
+  assert.equal((await h.ai.loadTaskAi(node,{})).chatRuns.length,20);
+  const fullPage=[message.id,...Array.from({length:99},(_,i)=>`unloaded-input-${i}`)];
+  h.queried.length=0;
+  const full=await h.ai.loadTaskAi(node,{},null,fullPage);
+  assert.equal(full.chatRuns.length,100);
+  assert.deepEqual(new Set(full.chatRuns.map(run=>run.inputMessageId)),new Set(fullPage));
+  const pageQuery=h.queried.find(query=>/input_message_id IN/.test(query.sql));
+  assert.match(pageQuery.sql,/json_each\(\?\)/);assert.equal(pageQuery.values.length,3);
+  assert.deepEqual(JSON.parse(pageQuery.values[2]),fullPage);
+  assert.ok(h.queried.every(query=>query.values.length<=100),"Every statement stays inside D1's bind limit");
 });
 
 test("AI new bot rejects a forged config version without leaving an orphan",async t=>{

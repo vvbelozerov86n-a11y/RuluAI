@@ -56,6 +56,9 @@ test("bullets, ordered lists and quotes render semantic elements without interpr
   const html = render('- Проверка\n- <b>текст</b>\n\n1. Шаг\n2. Результат\n\n> Имя:\n> <iframe src=evil>');
   assert.match(html, /<ul>/);
   assert.match(html, /<ol>/);
+  const numbered = render("3. Согласовать\n7. Опубликовать");
+  assert.match(numbered, /<li value="3">/);
+  assert.match(numbered, /<li value="7">/);
   assert.match(html, /<blockquote class="message-quote">/);
   assert.match(html, /&lt;b&gt;текст&lt;\/b&gt;/);
   assert.doesNotMatch(html, /<b>|<iframe/);

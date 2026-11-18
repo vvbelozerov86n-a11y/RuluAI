@@ -289,6 +289,30 @@ test("undo split does not discard independent group edits or additional children
   assert.equal(h.row("another").deleted_at,null);
 });
 
+test("undo split rejects independently changed priority and preserves matching priority", async () => {
+  for (const target of ["group", "child", "both"]) {
+    const h = harness();
+    try {
+      await success(h.actions.nestTask(h.form()));
+      const child = h.sqlite.prepare("SELECT id FROM tasks WHERE split_source_id='task'").get();
+      for (const id of target === "both" ? ["task",child.id] : [target === "group" ? "task" : child.id]) {
+        const task = h.row(id);
+        await success(h.actions.updateTaskState({},h.form({id,version:task.version,title:task.title,description:task.description,priority:"high"})));
+      }
+      if (target === "both") {
+        await success(h.actions.unnestTask(h.form()));
+        assert.equal(h.row("task").kind,"leaf");
+        assert.equal(h.row("task").priority,"high");
+      } else {
+        const groupBefore = {...h.row("task")}, childBefore = {...h.row(child.id)};
+        await rejectedAction(h.actions.unnestTask(h.form()),/приоритета/);
+        assert.deepEqual({...h.row("task")},groupBefore);
+        assert.deepEqual({...h.row(child.id)},childBefore);
+      }
+    } finally { h.sqlite.close(); }
+  }
+});
+
 test("split and undo transfer existing schedule entries while retaining their original plan", async () => {
   const h = harness();
   h.sqlite.exec(`INSERT INTO schedule_plans(task_id) VALUES ('task');
@@ -308,14 +332,116 @@ test("split and undo transfer existing schedule entries while retaining their or
   assert.equal(entry.hours,4);
 });
 
-test("undo split refuses a separately created child plan", async () => {
+test("an empty historical child plan does not block undo and its metadata is retained", async () => {
   const h = harness();
   await success(h.actions.nestTask(h.form()));
   const copy = h.sqlite.prepare("SELECT id FROM tasks WHERE split_source_id='task'").get();
   h.sqlite.prepare("INSERT INTO schedule_plans(task_id) VALUES (?)").run(copy.id);
-  await rejectedAction(h.actions.unnestTask(h.form()),/график, созданный отдельно/);
-  assert.equal(h.row("task").kind,"group");
-  assert.equal(h.row(copy.id).deleted_at,null);
+  const savedPlan = {...h.sqlite.prepare("SELECT * FROM schedule_plans WHERE task_id=?").get(copy.id)};
+  await success(h.actions.unnestTask(h.form()));
+  assert.equal(h.row("task").kind,"leaf");
+  assert.ok(h.row(copy.id).deleted_at);
+  assert.deepEqual({...h.sqlite.prepare("SELECT * FROM schedule_plans WHERE task_id=?").get(copy.id)},savedPlan);
+});
+
+test("undo split retains real child plan work and rejects a concurrent entry added after the activity check", async () => {
+  for (const concurrent of [false,true]) {
+    const h = harness();
+    try {
+      await success(h.actions.nestTask(h.form()));
+      const copy = h.sqlite.prepare("SELECT id FROM tasks WHERE split_source_id='task'").get();
+      h.sqlite.prepare("INSERT INTO schedule_plans(task_id) VALUES (?)").run(copy.id);
+      const addEntry = () => h.sqlite.prepare(`INSERT INTO schedule_entries(id,plan_task_id,task_id,member_id,title,start_date,end_date,hours)
+        VALUES ('child-work',?,?,'anna','Сохранённая работа','2026-11-18','2026-11-18',4)`).run(copy.id,copy.id);
+      if (concurrent) h.beforeBatch = addEntry;
+      else addEntry();
+      await rejectedAction(h.actions.unnestTask(h.form()),concurrent?/изменилась/:/график, созданный отдельно/);
+      assert.equal(h.row("task").kind,"group");
+      assert.equal(h.row(copy.id).deleted_at,null);
+      assert.equal(h.sqlite.prepare("SELECT hours FROM schedule_entries WHERE id='child-work'").get().hours,4);
+    } finally { h.sqlite.close(); }
+  }
+});
+
+test("resizing changes only card size and returns to its actual parent, mode and card anchor", async () => {
+  const h = harness();
+  try {
+    h.sqlite.exec("UPDATE tasks SET result='Сохранённый итог',priority='high',due_date='2026-12-01' WHERE id='task'");
+    for (const size of ["wide","tall","large","small"]) {
+      const before = {...h.row("task")};
+      const destination = await success(h.actions.resizeTaskState({},h.form({size,title:"Не менять",description:"Не менять",owner:"max",participants:["me"]})));
+      const after = {...h.row("task")};
+      assert.equal(after.size,size);
+      assert.equal(after.version,before.version+1);
+      for (const key of Object.keys(before).filter(key=>!["size","version","updated_at","last_mutation_id"].includes(key))) assert.equal(after[key],before[key],key);
+      assert.deepEqual(h.sqlite.prepare("SELECT member_id FROM task_participants WHERE task_id='task'").all().map(row=>row.member_id),["max"]);
+      assert.equal(destination.pathname,"/t/group");
+      assert.equal(destination.searchParams.get("mode"),"build");
+      assert.equal(destination.hash,"#task-card-task");
+    }
+    const group = await success(h.actions.resizeTaskState({},h.form({id:"group",version:h.row("group").version,size:"tall",mode:"view",parent:"task"})));
+    assert.equal(group.pathname,"/");
+    assert.equal(group.searchParams.get("mode"),"view");
+    assert.equal(group.hash,"#task-card-group");
+  } finally { h.sqlite.close(); }
+});
+
+test("resizing requires a manager, a supported size and the current task version", async () => {
+  const h = harness();
+  try {
+    const before = {...h.row("task")};
+    for (const role of ["executor","viewer"]) {
+      h.ctx = {...manager,memberId:"anna",role};
+      assert.match((await h.actions.resizeTaskState({},h.form({size:"large"}))).error,/руководителю/);
+    }
+    h.ctx = manager;
+    for (const size of ["", "enormous", "__proto__", "constructor"]) assert.match((await h.actions.resizeTaskState({},h.form({size}))).error,/размер/);
+    assert.match((await h.actions.resizeTaskState({},h.form({id:"root",version:h.row("root").version,size:"large"}))).error,/общей группы/);
+    assert.deepEqual({...h.row("task")},before);
+    const stale = h.form({size:"large"});
+    await success(h.actions.resizeTaskState({},h.form({size:"wide"})));
+    assert.match((await h.actions.resizeTaskState({},stale)).error,/изменилась/);
+    const currentSize=h.row("task").size;
+    h.beforeBatch=()=>h.sqlite.exec("UPDATE tasks SET version=version+1 WHERE id='task'");
+    assert.match((await h.actions.resizeTaskState({},h.form({size:"tall"}))).error,/изменилась/);
+    assert.equal(h.row("task").size,currentSize);
+  } finally { h.sqlite.close(); }
+});
+
+test("manager, direct owner and direct participant can start queued work without changing its result", async () => {
+  for (const ctx of [manager,{...manager,role:"executor",memberId:"anna"},{...manager,role:"executor",memberId:"max"}]) {
+    const h=harness();
+    try {
+      h.ctx=ctx;
+      h.sqlite.exec("UPDATE tasks SET result='Существующая заметка' WHERE id='task'");
+      const stale=h.form({status:"doing"});
+      const destination=await success(h.actions.setStatus(stale));
+      assert.equal(h.row("task").status,"doing");
+      assert.equal(h.row("task").result,"Существующая заметка");
+      assert.equal(destination.searchParams.get("flash"),"Задача взята в работу.");
+      await rejectedAction(h.actions.setStatus(stale),/изменилась/);
+    } finally { h.sqlite.close(); }
+  }
+});
+
+test("starting work rejects viewers, indirect assignment and a participant removed during the mutation", async () => {
+  const h=harness();
+  try {
+    for (const ctx of [{...manager,role:"viewer",memberId:"anna"},{...manager,role:"executor",memberId:"me"}]) {
+      h.ctx=ctx;
+      await rejectedAction(h.actions.setStatus(h.form({status:"doing"})),/назначенный участник/);
+      assert.equal(h.row("task").status,"todo");
+    }
+    h.ctx={...manager,role:"executor",memberId:"max"};
+    h.beforeBatch=()=>h.sqlite.exec("DELETE FROM task_participants WHERE task_id='task' AND member_id='max'");
+    await rejectedAction(h.actions.setStatus(h.form({status:"doing"})),/изменилась/);
+    assert.equal(h.row("task").status,"todo");
+    h.ctx={...manager,role:"executor",memberId:"anna"};
+    h.sqlite.exec("UPDATE tasks SET status='review',result='Итог' WHERE id='task'");
+    await rejectedAction(h.actions.setStatus(h.form({status:"doing"})),/руководителю/);
+    await rejectedAction(h.actions.setStatus(h.form({status:"done"})),/руководителю/);
+    assert.equal(h.row("task").status,"review");
+  } finally { h.sqlite.close(); }
 });
 
 test("permissions and expected status prevent unauthorized or stale acceptance", async () => {

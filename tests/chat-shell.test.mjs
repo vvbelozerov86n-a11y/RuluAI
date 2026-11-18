@@ -9,6 +9,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import ts from "typescript";
 import * as model from "../lib/ruli/model.ts";
+import * as chatAi from "../lib/ruli/chat-ai.ts";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const require = createRequire(import.meta.url);
@@ -16,17 +17,18 @@ const human = { id: "anna", name: "Анна", shortName: "Анна", role: "Ма
 const bot = { id: "analyst", name: "Исследователь", shortName: "AI", role: "Аналитика", initials: "AI", color: "bot", type: "bot" };
 const node = { id: "task", title: "Рабочая задача", kind: "leaf", children: [], participants: [], ownerId: "anna", version: 1 };
 
-function harness({ channels = [human, bot], viewerRole = "manager", bots = [], runs = [] } = {}) {
-  const captured = { feed: [], composer: [], channels: [] };
+function harness({ channels = [human, bot], viewerRole = "manager", bots = [], runs = [], chatDisabledReason = null, messages } = {}) {
+  const captured = { feed: [], composer: [], channels: [], aiScopes: [] };
   const imports = {
     "next/link": { __esModule: true, default: props => React.createElement("a", props) },
     "@/lib/ruli/collaboration": { loadTaskCollaboration: async (_node, _viewer, selected) => {
       captured.channels.push(selected);
-      return { channels, messages: [], messagePage: { hasMore: false, beforeCursor: null }, entries: [], scheduleVersion: 0 };
+      return { channels, messages: messages??runs.filter(run=>run.channelMemberId===(selected??null)&&run.inputMessageId).map(run=>({id:run.inputMessageId,taskId:"task",channelMemberId:selected??null,authorId:"me",authorName:"Manager",body:"Question",createdAt:"2026-11-18"})), messagePage: { hasMore: false, beforeCursor: null }, entries: [], scheduleVersion: 0 };
     } },
     "@/lib/ruli/access": { canManage: viewer => viewer.role === "manager" },
     "@/lib/ruli/model": model,
-    "@/lib/ruli/ai": { loadTaskAi: async () => ({ bots, chatRuns: runs }) },
+    "@/lib/ruli/ai": { loadTaskAi: async (_node,_viewer,_channel,ids) => { captured.aiScopes.push(ids);return { bots, chatRuns: runs, chatDisabledReason }; } },
+    "@/lib/ruli/chat-ai": chatAi,
     "./submit-button": { SubmitButton: ({ children }) => React.createElement("button", null, children) },
     "./message-feed": { MessageFeed: props => { captured.feed.push(props); return React.createElement("div", { className: "message-feed" }); } },
     "./message-composer": { MessageComposer: props => { captured.composer.push(props); return React.createElement("div", { className: "message-form" }); } },
@@ -62,7 +64,8 @@ test("chat shell projects AI run metadata without exposing stored output or requ
   const h = harness({ runs: [run] });
   await h.render("analyst");
   const passed = h.captured.feed[0].initialAiRuns;
-  assert.deepEqual(Object.keys(passed[0]).sort(), ["id", "botMemberId", "channelMemberId", "inputMessageId", "error", "status", "canRetry", "createdAt", "finishedAt"].sort());
+  assert.deepEqual(Object.keys(passed[0]).sort(), ["id", "botMemberId", "channelMemberId", "inputMessageId", "error", "status", "canRetry", "createdAt", "finishedAt", "output"].sort());
+  assert.equal(passed[0].output,null);
   assert.doesNotMatch(JSON.stringify(h.captured.feed), /PRIVATE_STORED_OUTPUT|PRIVATE_REQUESTER_ID/);
 });
 
@@ -104,4 +107,30 @@ test("read-only chat has no composer and agent badges describe configuration rat
     assert.doesNotMatch(rendered, /id="schedule"|href="#schedule"|График|график/);
     assert.doesNotMatch(rendered, /В сети|Онлайн|online|прочитано|прикрепить файл/i);
   }
+});
+
+test("shell passes chat AI permission separately from provider readiness and labels viewer's own channel",async()=>{
+  const denied=harness({viewerRole:"executor",chatDisabledReason:"Direct assignment required"});
+  await denied.render();assert.equal(denied.captured.composer[0].aiDisabledReason,"Direct assignment required");
+  const viewer=harness({viewerRole:"viewer",channels:[{...human,id:"me"}]});
+  const html=await viewer.render("me");
+  assert.match(html,/С руководителем/);assert.match(html,/Отправка сообщений недоступна для роли наблюдателя/);
+  assert.equal(viewer.captured.composer.length,0);assert.equal(viewer.captured.feed[0].canWrite,false);
+});
+
+test("shell safely projects a saved stale answer without requester or internal run fields",async()=>{
+  const h=harness({runs:[{id:"stale",kind:"chat",taskId:"task",botMemberId:"analyst",channelMemberId:"analyst",inputMessageId:"m",status:"stale",canRetry:true,error:"changed",
+    createdAt:"2026-11-18",finishedAt:"2026-11-18",output:"SAVED_ANSWER",requesterUserId:"INTERNAL_REQUESTER",leaseToken:"INTERNAL_LEASE"}]});
+  await h.render("analyst");assert.equal(h.captured.feed[0].initialAiRuns[0].output,"SAVED_ANSWER");
+  assert.doesNotMatch(JSON.stringify(h.captured.feed),/INTERNAL_/);
+});
+
+test("initial shell requests and serializes AI output only for the displayed message page",async()=>{
+  const runs=Array.from({length:250},(_,index)=>({id:`run-${index}`,kind:"chat",taskId:"task",channelMemberId:null,inputMessageId:`input-${index}`,botMemberId:"analyst",
+    status:"stale",error:"changed",output:`answer-${index}`.repeat(200),canRetry:true,createdAt:"2026-11-18",finishedAt:"2026-11-18"}));
+  const messages=[{id:"input-249",taskId:"task",channelMemberId:null,authorId:"me",authorName:"Manager",body:"Visible question",createdAt:"2026-11-18"}];
+  const h=harness({runs,messages});await h.render();
+  assert.deepEqual([...h.captured.aiScopes[0]],["input-249"]);
+  const passed=h.captured.feed[0].initialAiRuns;
+  assert.equal(passed.length,1);assert.equal(passed[0].id,"run-249");assert.ok(JSON.stringify(passed).length<2500);
 });
