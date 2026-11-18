@@ -42,6 +42,226 @@ test("actual SELECT never returns Anna's private messages to Max or a viewer, ev
   assert.deepEqual(plain((await h.collaboration.loadTaskCollaboration(node, forgedManager, "anna")).messages.map((entry) => entry.body)), ["Личный черновик"]);
 });
 
+function messagePages(h) {
+  return loadModule("lib/ruli/collaboration.ts", h.common, ["loadMessagePage", "MessagePageError"]);
+}
+
+function seedHistory(h, count, { taskId="launch", channel=null, prefix="history", createdAt="2026-11-18T10:00:00.000Z" } = {}) {
+  const insert=h.sqlite.prepare(`INSERT INTO task_messages
+    (id,task_id,channel_member_id,author_id,author_user_id,author_name,body,client_id,created_at)
+    VALUES (?,?,?,'anna','user-anna','Анна',?,?,?)`);
+  const ids=[];
+  for(let i=1;i<=count;i++) {
+    const id=`${prefix}-${String(i).padStart(4,"0")}`;
+    insert.run(id,taskId,channel,`Сообщение ${i}`,id,createdAt);
+    ids.push(id);
+  }
+  return ids;
+}
+
+test("message history pages all 251 equal-timestamp messages exactly once without OFFSET", async t => {
+  const h=fixture(t);
+  const expected=seedHistory(h,251);
+  const pages=messagePages(h);
+  const latest=await pages.loadMessagePage("launch");
+  assert.equal(latest.messages.length,100);
+  assert.equal(latest.hasMore,true);
+  assert.equal(typeof latest.beforeCursor,"string");
+  assert.deepEqual(plain(latest.messages.map(item=>item.id)),expected.slice(151));
+  const older=await pages.loadMessagePage("launch","general",latest.beforeCursor);
+  const oldest=await pages.loadMessagePage("launch",null,older.beforeCursor);
+  assert.equal(older.messages.length,100);
+  assert.equal(older.hasMore,true);
+  assert.equal(oldest.messages.length,51);
+  assert.equal(oldest.hasMore,false);
+  assert.equal(oldest.beforeCursor,null);
+  assert.deepEqual(plain([...oldest.messages,...older.messages,...latest.messages].map(item=>item.id)),expected);
+  assert.equal(new Set([...oldest.messages,...older.messages,...latest.messages].map(item=>item.id)).size,251);
+  const selects=h.queried.filter(entry=>entry.sql.includes("FROM task_messages"));
+  assert.equal(selects.length,3);
+  assert.ok(selects.every(entry=>entry.sql.includes("LIMIT 101")&&!/\bOFFSET\b/i.test(entry.sql)));
+  assert.ok(selects.every(entry=>!entry.sql.includes("schedule_entries")));
+});
+
+test("new messages arriving after a page do not shift its older-history cursor", async t => {
+  const h=fixture(t);
+  const expected=seedHistory(h,130);
+  const pages=messagePages(h);
+  const latest=await pages.loadMessagePage("launch");
+  seedHistory(h,3,{prefix:"new",createdAt:"2026-11-18T11:00:00.000Z"});
+  const older=await pages.loadMessagePage("launch",null,latest.beforeCursor);
+  assert.deepEqual(plain(older.messages.map(item=>item.id)),expected.slice(0,30));
+  assert.equal(older.hasMore,false);
+  const refreshed=await pages.loadMessagePage("launch");
+  assert.deepEqual(plain(refreshed.messages.slice(-3).map(item=>item.id)),["new-0001","new-0002","new-0003"]);
+});
+
+test("initial collaboration includes history metadata while preserving messages and schedules", async t => {
+  const h=fixture(t);
+  seedHistory(h,101);
+  const node=(await h.loadTree()).children.find(item=>item.id==="launch");
+  const data=await h.collaboration.loadTaskCollaboration(node,await h.access.requireAccess());
+  assert.equal(data.messages.length,100);
+  assert.equal(data.messagePage.hasMore,true);
+  assert.equal(typeof data.messagePage.beforeCursor,"string");
+  assert.deepEqual(plain(data.entries),[]);
+  assert.equal(data.scheduleVersion,0);
+  const h2=fixture(t);
+  seedHistory(h2,100);
+  const page=await messagePages(h2).loadMessagePage("launch");
+  assert.equal(page.hasMore,false);
+  assert.equal(page.beforeCursor,null);
+});
+
+test("latest and older history enforce current private-channel access and cursor scope", async t => {
+  const h=fixture(t);
+  seedHistory(h,115,{channel:"anna",prefix:"anna"});
+  seedHistory(h,1,{channel:"max",prefix:"max"});
+  seedHistory(h,1,{prefix:"general"});
+  const pages=messagePages(h);
+  h.as("anna");
+  const privatePage=await pages.loadMessagePage("launch","anna");
+  assert.equal(privatePage.messages.length,100);
+  const older=await pages.loadMessagePage("launch","anna",privatePage.beforeCursor);
+  assert.equal(older.messages.length,15);
+  assert.ok([...privatePage.messages,...older.messages].every(item=>item.channelMemberId==="anna"));
+  h.as("max");
+  for(const before of [undefined,privatePage.beforeCursor]) {
+    await assert.rejects(()=>pages.loadMessagePage("launch","anna",before),error=>error instanceof pages.MessagePageError&&error.status===403);
+  }
+  h.as("viewer");
+  await assert.rejects(()=>pages.loadMessagePage("launch","anna",privatePage.beforeCursor),error=>error.status===403);
+  assert.deepEqual(plain((await pages.loadMessagePage("launch")).messages.map(item=>item.id)),["general-0001"]);
+  h.as("manager");
+  await assert.rejects(()=>pages.loadMessagePage("launch","general",privatePage.beforeCursor),error=>error.status===400);
+  await assert.rejects(()=>pages.loadMessagePage("service","anna",privatePage.beforeCursor),error=>error.status===400);
+  h.sqlite.prepare("UPDATE tasks SET owner_id='max' WHERE id IN ('launch','letter')").run();
+  await assert.rejects(()=>pages.loadMessagePage("launch","anna",privatePage.beforeCursor),error=>error.status===403);
+});
+
+test("malformed history cursors are rejected without reading message rows", async t => {
+  const h=fixture(t);
+  const pages=messagePages(h);
+  for(const cursor of ["", "not-json", "{}", "[]", "x".repeat(1025),
+    JSON.stringify([2,"launch",null,"2026-11-18T00:00:00.000Z","message-1"]),
+    JSON.stringify([1,"launch",null,"2026-02-30T00:00:00.000Z","message-1"]),
+    JSON.stringify([1,"launch",null,"2026-11-18T25:00:00.000Z","message-1"]),
+    JSON.stringify([1,"launch",null,"2026-11-18T00:00:00.000Z","'; DROP TABLE tasks;--"]),
+  ]) {
+    await assert.rejects(()=>pages.loadMessagePage("launch",null,cursor),error=>error instanceof pages.MessagePageError&&error.status===400);
+  }
+  assert.equal(h.queried.filter(entry=>entry.sql.includes("FROM task_messages")).length,0);
+  assert.ok(h.one("SELECT id FROM tasks WHERE id='launch'"));
+});
+
+test("history rejects a deleted task and a task hidden by its deleted ancestor", async t => {
+  const h=fixture(t);
+  seedHistory(h,1,{taskId:"letter"});
+  const pages=messagePages(h);
+  h.sqlite.prepare("UPDATE tasks SET deleted_at='2026-11-18' WHERE id='launch'").run();
+  for(const taskId of ["launch","letter","missing-task"]) {
+    await assert.rejects(()=>pages.loadMessagePage(taskId),error=>error.status===404);
+  }
+});
+
+function historyRoute(h, extra={}) {
+  const pages=messagePages(h);
+  return loadModule("app/api/tasks/[id]/messages/route.ts",{
+    ...h.common,...pages,getChatGPTUser:async()=>({userId:"signed-in"}),
+    loadTaskAi:async()=>({chatRuns:[]}),...extra,
+  },["GET"]).GET;
+}
+
+test("history HTTP endpoint exposes pagination and only safe current AI retry fields", async t => {
+  const h=fixture(t);
+  seedHistory(h,110);
+  const run={id:"run-1",kind:"chat",taskId:"launch",botMemberId:"analyst",channelMemberId:null,inputMessageId:"history-0110",
+    error:null,status:"pending",canRetry:false,createdAt:"2026-11-18T10:00:00.000Z",finishedAt:null,
+    requesterUserId:"not-for-client",output:"private-provider-output",systemPrompt:"not-for-client",leaseToken:"not-for-client"};
+  const route=historyRoute(h,{loadTaskAi:async()=>({chatRuns:[run]})});
+  const response=await route(new Request("https://ruli.test/api/tasks/launch/messages?channel=general"),{params:Promise.resolve({id:"launch"})});
+  assert.equal(response.status,200);
+  assert.equal(response.headers.get("Cache-Control"),"private, no-store");
+  assert.equal(response.headers.get("Vary"),"Cookie");
+  const first=await response.json();
+  assert.equal(first.messages.length,100);
+  assert.equal(first.hasMore,true);
+  assert.equal(first.aiPending,1);
+  assert.deepEqual(Object.keys(first.aiRuns[0]).sort(),["id","botMemberId","channelMemberId","inputMessageId","error","status","canRetry","createdAt","finishedAt"].sort());
+  assert.equal(JSON.stringify(first).includes("not-for-client"),false);
+  assert.equal(JSON.stringify(first).includes("private-provider-output"),false);
+  run.status="failed";run.canRetry=true;run.error="Повторите запрос";run.finishedAt="2026-11-18T10:01:00.000Z";
+  const params=new URLSearchParams({channel:"general",before:first.beforeCursor});
+  const olderResponse=await route(new Request(`https://ruli.test/api/tasks/launch/messages?${params}`),{params:Promise.resolve({id:"launch"})});
+  const older=await olderResponse.json();
+  assert.equal(older.messages.length,10);
+  assert.equal(older.hasMore,false);
+  assert.equal(older.beforeCursor,null);
+  assert.equal(older.aiPending,0);
+  assert.equal(older.aiRuns[0].canRetry,true);
+  assert.equal(older.aiRuns[0].status,"failed");
+});
+
+test("history HTTP endpoint returns 400/401/403/404 without exposing messages or AI runs", async t => {
+  const h=fixture(t);
+  seedHistory(h,110,{channel:"anna"});
+  const pages=messagePages(h);
+  const privatePage=await pages.loadMessagePage("launch","anna");
+  const route=historyRoute(h,{loadTaskAi:async()=>{throw new Error("unauthorized AI read");}});
+  const bad=await route(new Request("https://ruli.test/api/tasks/launch/messages?before=broken"),{params:Promise.resolve({id:"launch"})});
+  assert.equal(bad.status,400);
+  h.as("max");
+  const query=new URLSearchParams({channel:"anna",before:privatePage.beforeCursor});
+  const forbidden=await route(new Request(`https://ruli.test/api/tasks/launch/messages?${query}`),{params:Promise.resolve({id:"launch"})});
+  assert.equal(forbidden.status,403);
+  assert.deepEqual(Object.keys(await forbidden.json()),["error"]);
+  const missing=await route(new Request("https://ruli.test/api/tasks/missing/messages"),{params:Promise.resolve({id:"missing"})});
+  assert.equal(missing.status,404);
+  const loggedOut=historyRoute(h,{getChatGPTUser:async()=>null});
+  const signedOut=await loggedOut(new Request("https://ruli.test/api/tasks/launch/messages"),{params:Promise.resolve({id:"launch"})});
+  assert.equal(signedOut.status,401);
+});
+
+test("history HTTP endpoint converts revoked team access into JSON 403 without redirecting", async t => {
+  const h=fixture(t);
+  const {redirect}=await import("../node_modules/vinext/dist/shims/navigation-errors.js");
+  const identity=h.identities.anna;
+  const access=loadModule("lib/ruli/access.ts",{
+    ...h.common,env:{},cache:fn=>fn,initRuli:async()=>{},requireChatGPTUser:async()=>identity,redirect,
+  },["requireAccess"]);
+  const pages=loadModule("lib/ruli/collaboration.ts",{...h.common,...access},["loadMessagePage","MessagePageError"]);
+  const route=loadModule("app/api/tasks/[id]/messages/route.ts",{
+    ...h.common,...access,...pages,getChatGPTUser:async()=>identity,loadTaskAi:async()=>({chatRuns:[]}),
+  },["GET"]).GET;
+  const request=new Request("https://ruli.test/api/tasks/launch/messages?channel=general");
+  assert.equal((await route(request,{params:Promise.resolve({id:"launch"})})).status,200);
+  h.sqlite.prepare("DELETE FROM team_accounts WHERE user_id=?").run(identity.userId);
+  const denied=await route(request,{params:Promise.resolve({id:"launch"})});
+  assert.equal(denied.status,403);
+  assert.equal(denied.headers.get("location"),null);
+  assert.equal(denied.headers.get("content-type"),"application/json");
+  assert.deepEqual(Object.keys(await denied.json()),["error"]);
+});
+
+test("history HTTP endpoint only converts exact access-denied redirects", async t => {
+  const h=fixture(t);
+  const request=new Request("https://ruli.test/api/tasks/launch/messages");
+  const canonical=Object.assign(new Error("redirect"),{digest:"NEXT_REDIRECT;replace;/access-denied;307;"});
+  const converted=await historyRoute(h,{loadMessagePage:async()=>{throw canonical;}})(request,{params:Promise.resolve({id:"launch"})});
+  assert.equal(converted.status,403);
+  const {redirect}=await import("../node_modules/vinext/dist/shims/navigation-errors.js");
+  let signIn;
+  try { redirect("/signin-with-chatgpt?return_to=%2F"); } catch(error) { signIn=error; }
+  for(const error of [signIn,new Error("database unavailable"),
+    Object.assign(new Error("unrelated"),{digest:"NEXT_REDIRECT;;%2Faccess-denied-other"}),
+    Object.assign(new Error("external"),{digest:"NEXT_REDIRECT;replace;https://example.test/access-denied;307;"}),
+    Object.assign(new Error("invalid"),{digest:"NEXT_REDIRECT;replace;/access-denied;999;"}),
+  ]) {
+    const route=historyRoute(h,{loadMessagePage:async()=>{throw error;}});
+    await assert.rejects(()=>route(request,{params:Promise.resolve({id:"launch"})}),actual=>actual===error);
+  }
+});
+
 test("send rejects another executor's channel, viewer writes and deleted tasks; preserves entered text", async (t) => {
   const h = fixture(t);
   h.as("max");

@@ -20,6 +20,22 @@ export function readDraft(raw: string | null, fallbackClientId: string): ChatDra
   return {body: "", clientId: fallbackClientId};
 }
 
+export function readUnsentDrafts(raw:string|null):ChatDraft[] {
+  try {
+    const value:unknown=raw?JSON.parse(raw):null;
+    if(!value||typeof value!=="object"||!("unsent" in value)||!Array.isArray(value.unsent))return [];
+    const byId=new Map<string,ChatDraft>();
+    for(const entry of value.unsent) {
+      if(!entry||typeof entry!=="object")continue;
+      const draft=entry as Record<string,unknown>;
+      if(typeof draft.body==="string"&&draft.body.trim()&&typeof draft.clientId==="string"&&/^[a-zA-Z0-9_-]{8,120}$/.test(draft.clientId)) {
+        byId.set(draft.clientId,{body:draft.body,clientId:draft.clientId});
+      }
+    }
+    return [...byId.values()];
+  } catch { return []; }
+}
+
 export function editDraft(current: ChatDraft, body: string, newClientId: string): ChatDraft {
   // Retrying unchanged content keeps its idempotency key. A new revision gets its own key.
   return body === current.body ? current : {body, clientId: newClientId};

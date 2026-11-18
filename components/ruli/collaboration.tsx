@@ -7,7 +7,9 @@ import { SubmitButton } from "./submit-button";
 import { MessageComposer } from "./message-composer";
 import { MessageFeed } from "./message-feed";
 import {loadTaskAi} from "@/lib/ruli/ai";
-import {AiChatRetry} from "./ai-task";
+import { Bot, LockKeyhole, MessageSquare, ShieldCheck } from "lucide-react";
+import { ChatChannels, type ChatChannelItem } from "./chat-channels";
+import "./chat.css";
 
 function dayNumber(value:string) {return Date.parse(value+"T12:00:00Z")/86400000;}
 function shortDate(value:string) {return new Intl.DateTimeFormat("ru-RU",{day:"numeric",month:"short",timeZone:"Asia/Barnaul"}).format(new Date(value+"T12:00:00Z"));}
@@ -18,11 +20,26 @@ export async function TaskCollaboration({node,members,viewer,channel,mode="view"
   const unavailable=Boolean(selected&&!data.channels.some(m=>m.id===selected));
   if(unavailable){selected=undefined;data=await loadTaskCollaboration(node,viewer);}
   const ai=await loadTaskAi(node,viewer,selected);
+  const chatAiRuns=ai.chatRuns.map(({id,botMemberId,channelMemberId,inputMessageId,error,status,canRetry,createdAt,finishedAt})=>({
+    id,botMemberId,channelMemberId,inputMessageId,error,status,canRetry,createdAt,finishedAt,
+  }));
   const messageClientId=crypto.randomUUID();
   const manager=canManage(viewer);
   const selectedMember=data.channels.find(m=>m.id===selected);
+  const selectedBot=selectedMember?.type==="bot"?ai.bots.find(bot=>bot.memberId===selected):undefined;
+  const ownExecutorChannel=viewer.role==="executor"&&selectedMember?.id===viewer.memberId;
+  const chatTitle=ownExecutorChannel?"С руководителем":selectedMember?.name??"Общий чат";
+  const providerName=(provider:string)=>provider==="xai"?"xAI · Grok":provider==="openai"?"OpenAI":provider==="grok-bot"?"Grok Bot":"AI-провайдер";
+  const configuration=(bot:typeof selectedBot):ChatChannelItem["configuration"]=>!bot?{label:"Нужна настройка",state:"missing"}:!bot.enabled?{label:"Выключен",state:"disabled"}:!bot.configured?{label:bot.kind==="agent"?"Нет подключения":"Нужен ключ",state:"missing"}:!bot.ready?{label:"Недоступен",state:"disabled"}:{label:"Настроен",state:"ready"};
+  const selectedConfiguration=selectedMember?.type==="bot"?configuration(selectedBot):undefined;
   const memberMap=new Map(members.map(m=>[m.id,m]));
   const chatHref=(id?:string)=>taskHref(node.id,mode)+"&chat="+encodeURIComponent(id??"general")+"#collaboration";
+  const channels:ChatChannelItem[]=data.channels.map(member=>{
+    const bot=member.type==="bot"?ai.bots.find(item=>item.memberId===member.id):undefined;
+    return {id:member.id,name:member.name,label:viewer.role==="executor"&&member.id===viewer.memberId?"С руководителем":member.name,
+      description:member.type==="bot"?providerName(bot?.provider??""):viewer.role==="executor"&&member.id===viewer.memberId?"Личный диалог":member.role||"Личный диалог",initials:member.initials,color:member.color,type:member.type,href:chatHref(member.id),
+      configuration:member.type==="bot"?configuration(bot):undefined};
+  });
   const begin=data.entries.length?Math.min(...data.entries.map(e=>dayNumber(e.startDate))):0;
   const finish=data.entries.length?Math.max(...data.entries.map(e=>dayNumber(e.endDate))):begin;
   const span=Math.max(1,finish-begin+1);
@@ -33,21 +50,29 @@ export async function TaskCollaboration({node,members,viewer,channel,mode="view"
     <div className="collaboration-context">
       <div className="collaboration-context-title"><span>Текущая задача</span><a href="#task-title">{node.title}</a></div>
       <nav aria-label="Перейти к разделу совместной работы"><a href="#discussion">К обсуждению ↓</a><a href="#schedule">К графику ↓</a></nav>
-      <p>Открыт чат: <strong>{selectedMember?`личный · ${selectedMember.name}`:"общий"}</strong></p>
+      <p>Открыт чат: <strong>{selectedMember?`личный · ${chatTitle}`:"общий"}</strong></p>
     </div>
-    <section className="collaboration-panel" id="discussion" aria-labelledby="discussion-title">
-      <div className="panel-heading"><div><h2 id="discussion-title">Обсуждение</h2><p>Вопросы, решения и договорённости по этой задаче.</p></div></div>
-      {unavailable?<p className="page-notice error" role="alert">Этот личный диалог недоступен. Открыт общий чат задачи.</p>:null}
-      <nav className="chat-channels" aria-label="Каналы обсуждения">
-        <a href={chatHref()} aria-current={!selected?"page":undefined}>Общий чат</a>
-        {data.channels.map(member=><a key={member.id} href={chatHref(member.id)} aria-current={selected===member.id?"page":undefined}>{member.name}<small>Личный диалог</small></a>)}
-      </nav>
-      <p className="channel-note">{selectedMember?`Личный диалог: руководитель и ${selectedMember.name}. Остальные участники его не видят.`:"Общий чат видят участники команды, имеющие доступ к задаче."}</p>
-      {selectedMember?.type==="bot"&&viewer.role==="viewer"?<p className="channel-note">{ai.bots.find(bot=>bot.memberId===selected)?.ready?`В этом диалоге ${selectedMember.name} отвечает автоматически через своего AI-провайдера.`:ai.bots.find(bot=>bot.memberId===selected)?.disabledReason??"Руководитель должен настроить этого бота перед началом диалога."}</p>:null}
-      <MessageFeed key={`feed:${viewer.userId}:${node.id}:${selected??"general"}`} taskId={node.id} channelMemberId={selected} viewerMemberId={viewer.memberId} initialMessages={data.messages}/>
-      {viewer.role!=="viewer"?<MessageComposer key={`composer:${viewer.userId}:${node.id}:${selected??"general"}`} taskId={node.id} channelMemberId={selected} viewerUserId={viewer.userId} clientId={messageClientId} mode={mode} bots={ai.bots} privateBot={selectedMember?.type==="bot"?ai.bots.find(bot=>bot.memberId===selected):undefined}/>:<p className="detail-note">У вас доступ для просмотра обсуждения.</p>}
-      {ai.chatRuns.filter(run=>run.canRetry).slice(0,3).map(run=><AiChatRetry key={run.id} taskId={node.id} run={run} clientId={crypto.randomUUID()}/>)}
-      <a className="refresh-link" href={chatHref(selected)}>Обновить сообщения</a>
+    <section className="collaboration-panel chat-workspace" id="discussion" aria-labelledby="discussion-title">
+      <ChatChannels key={`channels:${node.id}:${selected??"general"}`} channels={channels} selectedId={selected} generalHref={chatHref()}/>
+      <div className="chat-thread">
+        <header className="chat-thread-header">
+          <span className={`chat-thread-avatar ${selectedMember?.type??"general"}`} data-color={selectedMember?.color} aria-hidden="true">{selectedMember?.type==="bot"?<Bot/>:selectedMember?<span>{ownExecutorChannel?<ShieldCheck/>:selectedMember.initials}</span>:<MessageSquare/>}</span>
+          <div className="chat-thread-heading">
+            <span className="chat-thread-eyebrow">{selectedMember?"Личный диалог":"Обсуждение задачи"}</span>
+            <h2 id="discussion-title">{chatTitle}</h2>
+            <p className="chat-privacy">{selectedMember?<LockKeyhole aria-hidden="true"/>:<ShieldCheck aria-hidden="true"/>}<span>{ownExecutorChannel?"Ваш личный диалог с руководителем. Остальные участники его не видят.":selectedMember?`Руководитель и ${selectedMember.name}. Остальные участники не видят этот диалог.`:"Общий чат видит команда с доступом к этой задаче."}</span></p>
+            {selectedMember?.type==="bot"?<div className="chat-thread-badges"><span className="chat-provider-badge"><Bot aria-hidden="true"/>{providerName(selectedBot?.provider??"")}{selectedBot?.kind==="llm"?` · ${selectedBot.model}`:""}</span>{selectedConfiguration?<span className={`chat-config-badge ${selectedConfiguration.state}`}>{selectedConfiguration.label}</span>:null}</div>:null}
+          </div>
+        </header>
+        {selectedBot?<details className="chat-provider-disclosure"><summary>Как отвечает AI</summary><p>{selectedBot.kind==="agent"?`Сообщения этого диалога передаются внешнему агенту ${selectedBot.name} через Grok Bot. Его ответ появится здесь после обработки.`:`Сообщение, контекст этой задачи и переписка текущего диалога передаются ${providerName(selectedBot.provider)} (${selectedBot.model}). Ответ создаёт AI.`}</p>{selectedBot.disabledReason?<p>{selectedBot.disabledReason}</p>:null}{manager?<Link href="/team">Настройки команды и AI →</Link>:null}</details>:null}
+        {unavailable?<p className="page-notice error chat-notice" role="alert">Этот личный диалог недоступен. Открыт общий чат задачи.</p>:null}
+        <div className="chat-thread-body">
+          <MessageFeed key={`feed:${viewer.userId}:${node.id}:${selected??"general"}`} taskId={node.id} channelMemberId={selected} viewerMemberId={viewer.memberId} initialMessages={data.messages} initialPage={data.messagePage} members={members} canWrite={viewer.role!=="viewer"} initialAiRuns={chatAiRuns}/>
+        </div>
+        <div className="chat-compose-area">
+          {viewer.role!=="viewer"?<MessageComposer key={`composer:${viewer.userId}:${node.id}:${selected??"general"}`} taskId={node.id} channelMemberId={selected} viewerUserId={viewer.userId} clientId={messageClientId} mode={mode} bots={ai.bots} privateBot={selectedBot}/>:<p className="chat-read-only"><LockKeyhole aria-hidden="true"/>У вас доступ для просмотра обсуждения.</p>}
+        </div>
+      </div>
     </section>
     <section className="collaboration-panel" id="schedule" aria-labelledby="schedule-title">
       <div className="panel-heading"><div><h2 id="schedule-title">График выполнения</h2><p>{data.entries.length?`${plural(data.entries.length,"рабочий отрезок","рабочих отрезка","рабочих отрезков")} · ${totalHours} ч`:"Распределите работу по датам и загрузке исполнителей."}</p></div></div>

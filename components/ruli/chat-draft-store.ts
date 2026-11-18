@@ -1,24 +1,28 @@
 "use client";
-import {acknowledgeDraft, editDraft, readDraft, type ChatDraft} from "./chat-drafts";
+import {acknowledgeDraft, editDraft, readDraft, readUnsentDrafts, type ChatDraft} from "./chat-drafts";
 
-type Snapshot = {draft: ChatDraft; persistent: boolean};
+type Snapshot = {draft: ChatDraft; unsent:ChatDraft[]; persistent: boolean};
 const stores = new Map<string, ReturnType<typeof createStore>>();
 
 function createStore(key: string, initialClientId: string) {
-  const serverSnapshot: Snapshot = {draft: {body: "", clientId: initialClientId}, persistent: true};
+  const serverSnapshot: Snapshot = {draft: {body: "", clientId: initialClientId}, unsent:[], persistent: true};
   let snapshot = serverSnapshot;
   if (typeof window !== "undefined") {
-    try { snapshot = {draft: readDraft(window.sessionStorage.getItem(key), initialClientId), persistent: true}; }
+    try {
+      const raw=window.sessionStorage.getItem(key);
+      snapshot = {draft: readDraft(raw, initialClientId), unsent:readUnsentDrafts(raw), persistent: true};
+    }
     catch { snapshot = {...serverSnapshot, persistent: false}; }
   }
   const listeners = new Set<() => void>();
-  function save(draft: ChatDraft) {
+  function save(draft: ChatDraft,unsent=snapshot.unsent) {
     let persistent = true;
     try {
-      if (draft.body) window.sessionStorage.setItem(key, JSON.stringify(draft));
+      // Save the current draft and recovery texts atomically in one storage item.
+      if (draft.body||unsent.length) window.sessionStorage.setItem(key, JSON.stringify({...draft,unsent}));
       else window.sessionStorage.removeItem(key);
     } catch { persistent = false; }
-    snapshot = {draft, persistent};
+    snapshot = {draft, unsent, persistent};
     listeners.forEach(listener => listener());
   }
   return {
@@ -31,7 +35,26 @@ function createStore(key: string, initialClientId: string) {
     },
     acknowledge(clientId: string) {
       const next = acknowledgeDraft(snapshot.draft, clientId, crypto.randomUUID());
-      if (next !== snapshot.draft) save(next);
+      const unsent=snapshot.unsent.filter(item=>item.clientId!==clientId);
+      if (next !== snapshot.draft||unsent.length!==snapshot.unsent.length) save(next,unsent);
+    },
+    preserveUnsent(draft:ChatDraft) {
+      if(!draft.body.trim()||snapshot.unsent.some(item=>item.clientId===draft.clientId))return;
+      const clientId=/^[a-zA-Z0-9_-]{8,120}$/.test(draft.clientId)?draft.clientId:crypto.randomUUID();
+      save(snapshot.draft,[...snapshot.unsent,{body:draft.body,clientId}]);
+    },
+    restoreUnsent(clientId:string):"restored"|"too-long"|"missing" {
+      const failed=snapshot.unsent.find(item=>item.clientId===clientId);
+      if(!failed)return "missing";
+      const current=snapshot.draft;
+      const body=current.body===failed.body?current.body:current.body?`${current.body}\n\n${failed.body}`:failed.body;
+      if(body.length>5000)return "too-long";
+      const next=current.body===body?current:{body,clientId:current.body?crypto.randomUUID():failed.clientId};
+      save(next,snapshot.unsent.filter(item=>item.clientId!==clientId));
+      return "restored";
+    },
+    discardUnsent(clientId:string) {
+      save(snapshot.draft,snapshot.unsent.filter(item=>item.clientId!==clientId));
     },
   };
 }
